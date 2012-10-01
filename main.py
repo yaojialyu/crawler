@@ -7,65 +7,111 @@ import logging
 import requests
 from bs4 import BeautifulSoup 
 from urlparse import urljoin,urlparse
+from collections import deque
+from urllib2 import quote
+
+visitedHrefs = set()
+unvisitedHrefs = deque()
+logger = logging.getLogger()
 
 
+def loggingConfig(logFile, logLevel):
+    LEVELS={
+        1:logging.CRITICAL,
+        2:logging.ERROR,
+        3:logging.WARNING,
+        4:logging.INFO,
+        5:logging.DEBUG,}
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+    fileHandler = logging.FileHandler(logFile)
+    fileHandler.setFormatter(formatter)
+    logger.addHandler(fileHandler)
+    logger.setLevel(LEVELS.get(logLevel))
 
 def getHtml(url):
     '''
     根据url,获取html源代码
     '''
-    #给非http开头的url 加上http://
-    if not url.startswith('http'):
-        url = 'http://' + url
     #自定义header,防止被禁
     headers = {
         'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/536.5 (KHTML, like Gecko) Chrome/19.0.1084.52 Safari/536.5',
         'Referer': url,
     }
-    #doubancookies = dict(bid="sXP/lxGdf/o", ct="y", ll="118283", ck="38ij", __utma="30149280.775266482.1343046696.1348654603.1348664397.103", __utmb="30149280.4.10.1348664397", __utmc="30149280", __utmz="30149280.1348654603.102.21.utmcsr=s.weibo.com|utmccn=(referral)|utmcmd=referral|utmcct=/weibo/%25E8%25B1%2586%25E7%2593%25A3%2520%25E6%25A0%25A1%25E6%258B%259B&Refer=STopic_box", __utmv="30149280.153")
     try:
-        #r = requests.get(url, headers=headers, timeout=10, prefetch=False,cookies=doubancookies)
         r = requests.get(url, headers=headers, timeout=10, prefetch=False,)
     except requests.exceptions.Timeout, e:
-        print e
+        logger.error(e)
     except requests.exceptions.ConnectionError, e:
-        print e
+        logger.error(e)
     else:
         #只抓取普通网页，避免访问图像或其它文件的链接。网页为200时再获取源代码 。设置了prefetch=False，当访问text 时才下载网页内容
         if r.headers['Content-Type'].find('html') != -1 and r.status_code == requests.codes.ok:
-            return r.text
+            logger.info('Get links from : %s ' % url)
+            print 'Get links from : %s ' % url
+            try:
+                return r.text
+            except Exception,e:
+                logger.error(e)
     return None
 
-def getHrefs(html, url):
+def getHrefs(url):
     '''
     解析html源码，获取其中的链接。 url参数用于处理相对链接。
     '''
+    visitedHrefs.add(url)
+    html = getHtml(url)
+    if html == None or html == '' or url == None or url == '':
+        return None
     soup = BeautifulSoup(html)
     results = soup.find_all('a',href=True)
-    #不放入重复的链接，选择set而非list
-    hrefs = set()
     for a in results:
-        href = a.get('href')
+        #必须encode utf8 因为中文链接如 http://aa.com/文件.pdf 不会被url编码，从而导致encodeException
+        href = a.get('href').encode('utf8')  
         #处理相对链接的问题
         if not href.startswith('http'):
             href = urljoin(url, href)
         #只获取http或https网页,去除如ftp://这样的链接
         if urlparse(href).scheme == 'http' or urlparse(href).scheme == 'https':
-            hrefs.add(href)
-    return hrefs
+            if  href not in unvisitedHrefs and href not in visitedHrefs:
+                unvisitedHrefs.append(href)
 
+
+def getHrefsFromURL(url, depth):
+    unvisitedHrefs.append(url)
+    currentDepth = 1
+    location = url
+    flag = False
+
+    #使用BFS算法， 用location标注每一层的最后一个链接。从而控制爬虫深度
+    while currentDepth < depth+1:
+        url = unvisitedHrefs.popleft()
+        if location == url:
+            flag = True
+        
+        getHrefs(url)
+
+        if flag:
+            flag = False
+            logger.info('unvisitedHrefs: %d' % len(unvisitedHrefs))
+            logger.info('visited: %d' % len(visitedHrefs))
+            logger.info('====================Depth %d Finish ====================' % currentDepth)
+            currentDepth += 1
+            location = unvisitedHrefs[len(unvisitedHrefs)-1]
 
 def main():
     #读取命令行参数
     args = parser.parse_args()
     url = args.url
+    depth = args.depth
+    logFile = args.logFile
+    logLevel = args.logLevel
 
-    html = getHtml(url)
-    #print html
-    if html != None:
-        hrefs = getHrefs(html, url)
-        for h in hrefs:
-            print h
+    loggingConfig(logFile, logLevel)
+
+    if not url.startswith('http'):
+        url = 'http://' + url
+    getHrefsFromURL(url, depth)
+    
 
 
 if __name__ == '__main__':
