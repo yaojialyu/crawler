@@ -6,7 +6,7 @@ A Web crawler for Knownsec
 usage
 -------------
 ```shell
-usage: main.py [-h] -u URL -d DEPTH [--logfile FILE] [--loglevel {1,2,3,4,5}]
+main.py [-h] -u URL -d DEPTH [--logfile FILE] [--loglevel {1,2,3,4,5}]
                [--thread NUM] [--dbfile FILE] [--key KEYWORD] [--testself]
 ```
 
