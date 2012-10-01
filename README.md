@@ -3,10 +3,16 @@ crawler
 
 A Web crawler for Knownsec
 
+usage
+-------------
+```shell
 usage: main.py [-h] -u URL -d DEPTH [--logfile FILE] [--loglevel {1,2,3,4,5}]
                [--thread NUM] [--dbfile FILE] [--key KEYWORD] [--testself]
+```
 
 optional arguments:
+-------------
+```shell
   -h, --help            show this help message and exit  
   -u URL                Specify the begin url  
   -d DEPTH              Specify the crawling depth  
@@ -17,3 +23,4 @@ optional arguments:
   --dbfile FILE         The SQLite file path. Default:data.sql  
   --key KEYWORD         The keyword for crawling  
   --testself            Crawler self test  
+```
