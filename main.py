@@ -2,6 +2,7 @@
 #Author:lvyaojia
 #Date:2012.9.23
 
+import threading, Queue, time, sys
 from options import parser
 import logging
 import requests
@@ -10,8 +11,11 @@ from urlparse import urljoin,urlparse
 from collections import deque
 from urllib2 import quote
 
-visitedHrefs = set()
-unvisitedHrefs = deque()
+Lock = threading.Lock()
+Jobs = Queue.Queue()
+Pool = []
+VisitedHrefs = set()
+UnvisitedHrefs = deque()
 
 #logger 为全局变量——线程安全
 #The logging module is intended to be thread-safe without any special work 
@@ -38,6 +42,7 @@ def loggingConfig(logFile, logLevel):
     fileHandler.setFormatter(formatter)
     logger.addHandler(fileHandler)
     logger.setLevel(LEVELS.get(logLevel))
+
 
 def __getPageSource__(url):
     '''
@@ -68,7 +73,7 @@ def getHrefs(url):
     '''
     解析html源码，获取其中的链接。 url参数用于处理相对链接。
     '''
-    visitedHrefs.add(url)
+    VisitedHrefs.add(url)
     html = __getPageSource__(url)
     if url == None or url == '':
         logger.warning('URL is illegal!!')
@@ -88,47 +93,74 @@ def getHrefs(url):
                 href = urljoin(url, href)
             #只获取http或https网页,去除如ftp://这样的链接
             if urlparse(href).scheme == 'http' or urlparse(href).scheme == 'https':
-                if  href not in unvisitedHrefs and href not in visitedHrefs:
-                    unvisitedHrefs.append(href)
+                if  href not in UnvisitedHrefs and href not in VisitedHrefs:
+                    UnvisitedHrefs.append(href)
 
+
+def doWorkFromJobs():
+    while True:
+        command, url = Jobs.get() 
+        if command == 'stop':
+            break
+        try:
+            if command == 'start':
+                getHrefs(url)
+            else:
+                raise ValueError, 'Unknown command %r' % command
+        except Exception,e:
+            logger.critical(e)
+
+def initThreadPool(threads, daemons=True):
+    for i in range(threads):
+         new_thread = threading.Thread(target=doWorkFromJobs)
+         new_thread.setDaemon(daemons)
+         Pool.append(new_thread)
+         new_thread.start()
+
+def requestWork(url, command='process'):
+    Jobs.put((command, url))
+
+def stopWorking():
+    for i in range(len(Pool)):
+        requestWork(None, 'stop')
+    for thread in Pool:
+        thread.join()
+    del Pool[:]
 
 #这里作为主线程
 def getHrefsFromURL(url, depth):
-    unvisitedHrefs.append(url)
+    UnvisitedHrefs.append(url)
     currentDepth = 1
     location = url
     flag = False
 
     #使用BFS算法， 用location标注每一层的最后一个链接。从而控制爬虫深度
     while currentDepth < depth+1:
-        url = unvisitedHrefs.popleft()
+        url = UnvisitedHrefs.popleft()
         if location == url:
             flag = True
         
         #在这里可以分配任务给线程池
-        getHrefs(url)
+        requestWork(url)
 
         if flag:
             flag = False
-            logger.info('Unvisited Links: %d' % len(unvisitedHrefs))
-            logger.info('Visited Links: %d' % len(visitedHrefs))
+            logger.info('Unvisited Links: %d' % len(UnvisitedHrefs))
+            logger.info('Visited Links: %d' % len(VisitedHrefs))
             logger.info('**** Depth %d Finish ****' % currentDepth)
             currentDepth += 1
-            location = unvisitedHrefs[len(unvisitedHrefs)-1]
+            location = UnvisitedHrefs[len(UnvisitedHrefs)-1]
+    stopWorking()
 
 def main():
     #读取命令行参数
     args = parser.parse_args()
-    url = args.url
-    depth = args.depth
-    logFile = args.logFile
-    logLevel = args.logLevel
+    if not args.url.startswith('http'):
+        args.url = 'http://' + args.url
 
-    loggingConfig(logFile, logLevel)
-
-    if not url.startswith('http'):
-        url = 'http://' + url
-    getHrefsFromURL(url, depth)
+    loggingConfig(args.logFile, args.logLevel)
+    initThreadPool(args.threadNum, daemons=True)
+    getHrefsFromURL(args.url, args.depth)
     
 
 
