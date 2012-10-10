@@ -12,27 +12,38 @@ from urllib2 import quote
 
 visitedHrefs = set()
 unvisitedHrefs = deque()
+
+#logger 为全局变量——线程安全
+#The logging module is intended to be thread-safe without any special work 
+#needing to be done by its clients. It achieves this though using threading 
+#locks; there is one lock to serialize access to the module’s shared data, and 
+#each handler also creates a lock to serialize access to its underlying I/O.
 logger = logging.getLogger()
 
 
 def loggingConfig(logFile, logLevel):
+    '''
+    配置logging的日志文件以及日志的记录等级
+    '''
     LEVELS={
-        1:logging.CRITICAL,
+        1:logging.CRITICAL, 
         2:logging.ERROR,
         3:logging.WARNING,
         4:logging.INFO,
-        5:logging.DEBUG,}
+        5:logging.DEBUG,#数字最大记录最详细
+        }
+
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
     fileHandler = logging.FileHandler(logFile)
     fileHandler.setFormatter(formatter)
     logger.addHandler(fileHandler)
     logger.setLevel(LEVELS.get(logLevel))
 
-def getHtml(url):
+def __getPageSource__(url):
     '''
     根据url,获取html源代码
     '''
-    #自定义header,防止被禁
+    #自定义header,防止被禁,某些情况如豆瓣,还需制定cookies
     headers = {
         'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/536.5 (KHTML, like Gecko) Chrome/19.0.1084.52 Safari/536.5',
         'Referer': url,
@@ -46,8 +57,7 @@ def getHtml(url):
     else:
         #只抓取普通网页，避免访问图像或其它文件的链接。网页为200时再获取源代码 。设置了prefetch=False，当访问text 时才下载网页内容
         if r.headers['Content-Type'].find('html') != -1 and r.status_code == requests.codes.ok:
-            logger.info('Get links from : %s ' % url)
-            print 'Get links from : %s ' % url
+            logger.debug('Get links from : %s ' % url)
             try:
                 return r.text
             except Exception,e:
@@ -59,23 +69,30 @@ def getHrefs(url):
     解析html源码，获取其中的链接。 url参数用于处理相对链接。
     '''
     visitedHrefs.add(url)
-    html = getHtml(url)
-    if html == None or html == '' or url == None or url == '':
+    html = __getPageSource__(url)
+    if url == None or url == '':
+        logger.warning('URL is illegal!!')
         return None
-    soup = BeautifulSoup(html)
-    results = soup.find_all('a',href=True)
-    for a in results:
-        #必须encode utf8 因为中文链接如 http://aa.com/文件.pdf 不会被url编码，从而导致encodeException
-        href = a.get('href').encode('utf8')  
-        #处理相对链接的问题
-        if not href.startswith('http'):
-            href = urljoin(url, href)
-        #只获取http或https网页,去除如ftp://这样的链接
-        if urlparse(href).scheme == 'http' or urlparse(href).scheme == 'https':
-            if  href not in unvisitedHrefs and href not in visitedHrefs:
-                unvisitedHrefs.append(href)
+    elif html == None or html == '':
+        logger.warning('Page may contain NOTHING, or it\'s not a normal Html page for %s' % url)
+        return None
+    else:
+        soup = BeautifulSoup(html)
+        #使用bs4查找页面内所有带链接的<a>标签
+        results = soup.find_all('a',href=True)
+        for a in results:
+            #必须将链接encode为utf8, 因为中文文件链接如 http://aa.com/文件.pdf 不会被自动url编码，从而导致encodeException
+            href = a.get('href').encode('utf8')
+            #处理相对链接的问题
+            if not href.startswith('http'):
+                href = urljoin(url, href)
+            #只获取http或https网页,去除如ftp://这样的链接
+            if urlparse(href).scheme == 'http' or urlparse(href).scheme == 'https':
+                if  href not in unvisitedHrefs and href not in visitedHrefs:
+                    unvisitedHrefs.append(href)
 
 
+#这里作为主线程
 def getHrefsFromURL(url, depth):
     unvisitedHrefs.append(url)
     currentDepth = 1
@@ -88,13 +105,14 @@ def getHrefsFromURL(url, depth):
         if location == url:
             flag = True
         
+        #在这里可以分配任务给线程池
         getHrefs(url)
 
         if flag:
             flag = False
-            logger.info('unvisitedHrefs: %d' % len(unvisitedHrefs))
-            logger.info('visited: %d' % len(visitedHrefs))
-            logger.info('====================Depth %d Finish ====================' % currentDepth)
+            logger.info('Unvisited Links: %d' % len(unvisitedHrefs))
+            logger.info('Visited Links: %d' % len(visitedHrefs))
+            logger.info('**** Depth %d Finish ****' % currentDepth)
             currentDepth += 1
             location = unvisitedHrefs[len(unvisitedHrefs)-1]
 
