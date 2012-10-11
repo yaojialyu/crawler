@@ -51,8 +51,9 @@ class Downloader(object):
         self.running = 0    #正在运行的线程数
         self.__initThreadPool__()   #初始化线程池
 
-    def getCurrentTaskCount(self):
-        return self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
+    def taskleft(self):
+        count = self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
+        return count
 
     def assignTask(self,url, command='start'):
         self.taskQueue.put((command, url))
@@ -69,11 +70,11 @@ class Downloader(object):
 
     def __initThreadPool__(self):
         for i in range(self.threadNum):
-             thread = Thread(target=self.__doTasks__)
-             thread.setDaemon(True)
-             self.threadPool.append(thread)
-             thread.start()
-             #self.logger.debug('start thread: %s' % i) #thread 有自己的名称
+            thread = Thread(target=self.__doTasks__)
+            thread.setDaemon(True)
+            self.threadPool.append(thread)
+            thread.start()
+            #self.logger.debug('start thread: %s' % i) #thread 有自己的名称
 
     def __doTasks__(self):
         while True:
@@ -84,7 +85,9 @@ class Downloader(object):
                 self.running += 1 
             try:
                 if command == 'start':
+                    print 'start download'
                     pageSource = self.__getPageSource__(url)
+                    print 'finish get pageSource'
                     self.resultQueue.put((url, pageSource))
                 else:
                     raise ValueError, 'Unknown command %r' % command
@@ -104,11 +107,12 @@ class Downloader(object):
             'Referer': url,
         }
         try:
+            visitedHrefs.add(url)
             response = requests.get(url, headers=headers, timeout=10, prefetch=False)
         except Exception,e:
-            self.logger.error(e + '\nURL: %s' % url)
+            self.logger.error(str(e) + '\nURL: %s' % url)
         else:
-            #只抓取普通网页，避免访问图像或其它文件的链接。网页为200时再获取源代码 。设置了prefetch=False，当访问text 时才下载网页内容
+            #只抓取普通网页，避免访问图像或其它文件的链接。网页为200时再获取源代码 。设置了prefetch=False，当访问text 时才下载网页内容        
             if response.headers['Content-Type'].find('html') != -1 and response.status_code == requests.codes.ok:
                 self.logger.debug('Get Page from : %s ' % url)
                 print 'Get Page from : %s ' % url
@@ -146,42 +150,32 @@ def getHrefs(taskResult):
 visitedHrefs = set()    #已访问的链接
 unvisitedHrefs = deque()    #待访问的链接
 
-#主线程
 def main():
-    #读取命令行参数
     args = parser.parse_args()
     if not args.url.startswith('http'):
         args.url = 'http://' + args.url
-    #配置logging
     loggingConfig(args.logFile, args.logLevel)
 
-    currentDepth = 1    #标注当前深度
-    location = args.url #每个深度的最后一个链接,这里代表第一层的最后一个链接（只有一个根链接）
-    flag = False
-
     downloader = Downloader(args, logger)
-    unvisitedHrefs.append(args.url) 
+    unvisitedHrefs.append(args.url)
 
-    #使用BFS算法， 用location标注每一层的最后一个链接。从而控制爬虫深度
+    currentDepth = 1 #标注当前深度
+
+    count = 0
     while currentDepth < args.depth+1:
-        url = unvisitedHrefs.popleft()
-        if location == url:
-            flag = True
-        
-        #在这里可以分配任务给线程池
-        downloader.assignTask(url)
-        getHrefs(downloader.getTaskResult())
-
-        if flag:
-            flag = False
-            logger.info('Unvisited Links: %d' % len(unvisitedHrefs))
-            logger.info('Visited Links: %d' % len(visitedHrefs))
-            logger.info('**** Depth %d Finish ****' % currentDepth)
-            currentDepth += 1
-            location = unvisitedHrefs[len(unvisitedHrefs)-1]
+        print currentDepth
+        while unvisitedHrefs:
+            count += 1
+            url = unvisitedHrefs.popleft()
+            downloader.assignTask(url)  #分配任务
+        while downloader.taskleft():
+            result = downloader.getTaskResult()  #这里若没有结果的话，会阻塞
+            getHrefs(result)
+            print 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        currentDepth += 1
+            
+    print 'all connections: %d' % count
     downloader.stopWorking()
-    
-
 
 if __name__ == '__main__':
     main()
