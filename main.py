@@ -7,6 +7,7 @@ from Queue import Queue
 from options import parser
 import logging
 import requests
+import time
 from bs4 import BeautifulSoup 
 from urlparse import urljoin,urlparse
 from collections import deque
@@ -81,21 +82,25 @@ class Downloader(object):
             command, url = self.taskQueue.get() #这里也会Blocked
             if command == 'stop':
                 break
-            with self.lock: #保证操作的原子性，正在运行的线程数+1
-                self.running += 1 
+            
+            self.lock.acquire() #保证操作的原子性，正在运行的线程数+1
+            self.running = self.running + 1 
+            self.lock.release()
             try:
                 if command == 'start':
-                    print 'start download'
                     pageSource = self.__getPageSource__(url)
-                    print 'finish get pageSource'
                     self.resultQueue.put((url, pageSource))
                 else:
                     raise ValueError, 'Unknown command %r' % command
             except Exception,e:
                 self.logger.critical(e)
-            with self.lock: #保证操作的原子性，正在运行的线程数-1
-                self.running -= 1 
+
+            self.lock.acquire()
+            self.running = self.running - 1
+            self.lock.release()
+
             self.taskQueue.task_done()
+            
 
     def __getPageSource__(self, url):
         '''
@@ -107,7 +112,6 @@ class Downloader(object):
             'Referer': url,
         }
         try:
-            visitedHrefs.add(url)
             response = requests.get(url, headers=headers, timeout=10, prefetch=False)
         except Exception,e:
             self.logger.error(str(e) + '\nURL: %s' % url)
@@ -123,12 +127,13 @@ class Downloader(object):
         return None
 
 
-def getHrefs(taskResult):
+def getHrefs(taskResult, unvisitedHrefs, visitedHrefs):
     '''
     解析html源码，获取其中的链接。 url参数用于处理相对链接。
     '''
     url, pageSource = taskResult
     if pageSource == None or pageSource == '':
+        #网页内容为空,或网页地址为html以为的其它页面
         logger.warning('Page may contain NOTHING, or it\'s not a normal Html page for %s' % url)
         return None
     else:
@@ -143,38 +148,41 @@ def getHrefs(taskResult):
                 href = urljoin(url, href)
             #只获取http或https网页,去除如ftp://这样的链接
             if urlparse(href).scheme == 'http' or urlparse(href).scheme == 'https':
+                #保证每个链接只访问一次
                 if  href not in unvisitedHrefs and href not in visitedHrefs:
                     unvisitedHrefs.append(href)
     
-
-visitedHrefs = set()    #已访问的链接
-unvisitedHrefs = deque()    #待访问的链接
 
 def main():
     args = parser.parse_args()
     if not args.url.startswith('http'):
         args.url = 'http://' + args.url
-    loggingConfig(args.logFile, args.logLevel)
+    loggingConfig(args.logFile, args.logLevel)  #初始化logging 模块
+
+    visitedHrefs = set()    #已访问的链接
+    unvisitedHrefs = deque()    #待访问的链接
 
     downloader = Downloader(args, logger)
-    unvisitedHrefs.append(args.url)
-
-    currentDepth = 1 #标注当前深度
-
-    count = 0
+    unvisitedHrefs.append(args.url) #添加首个待访问的链接
+    currentDepth = 1 #标注当前页面深度
+    count = 0   #计算共访问了多少个页面
     while currentDepth < args.depth+1:
-        print currentDepth
         while unvisitedHrefs:
+            print 'while 11111 begin'
             count += 1
             url = unvisitedHrefs.popleft()
-            downloader.assignTask(url)  #分配任务
+            print url,'!!!'
+            downloader.assignTask(url)  #分配下载任务
+            visitedHrefs.add(url)
         while downloader.taskleft():
-            result = downloader.getTaskResult()  #这里若没有结果的话，会阻塞
-            getHrefs(result)
-            print 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            print 'while 22222 begin'
+            taskResult = downloader.getTaskResult()  #这里若没有结果的话，会阻塞
+            print 'taskResult Block!!'
+            getHrefs(taskResult, unvisitedHrefs, visitedHrefs)
+
+        logger.debug('-----Depth %d Finish. all connections: %d-----' % (currentDepth, count))
         currentDepth += 1
-            
-    print 'all connections: %d' % count
+
     downloader.stopWorking()
 
 if __name__ == '__main__':
