@@ -43,6 +43,7 @@ def loggingConfig(logFile, logLevel):
 
 class Downloader(object):
     def __init__(self, args, logger):
+        self.depth = args.depth  #指定的网页深度
         self.taskQueue = Queue() #下载任务队列
         self.resultQueue = Queue() #完成队列
         self.threadNum = args.threadNum #线程数
@@ -50,25 +51,59 @@ class Downloader(object):
         self.lock = Lock() #线程锁
         self.logger = logger #logging
         self.running = 0    #正在运行的线程数
+        self.__currentDepth__ = 1  #标注当前网页深度
         self.__initThreadPool__()   #初始化线程池
+        self.visitedHrefs = set()    #已访问的链接
+        self.unvisitedHrefs = deque()    #待访问的链接
+        self.unvisitedHrefs.append(args.url) #添加首个待访问的链接
+        self.totalLinks = 0   #记录共访问了多少个页面
 
     def taskleft(self):
         #print self.taskQueue.qsize(),self.resultQueue.qsize(),self.running
         count = self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
         return count
 
-    def assignTask(self,url, command='start'):
-        self.taskQueue.put((command, url))
+    def start(self):
+        print 'Start Crawling...'
+        self.__startInformationTimer__()
+        while self.__currentDepth__ < self.depth+1:
+            #若没有需要访问的链接，则break
+            if not self.unvisitedHrefs:
+                break
+            while self.unvisitedHrefs:
+                self.totalLinks += 1
+                url = self.unvisitedHrefs.popleft()
+                self.__assignTask__(url)  #分配下载任务
+                self.visitedHrefs.add(url)
+            while self.taskleft():
+                taskResult = self.__getTaskResult__()  #这里若没有结果的话，会阻塞
+                addUnvisitedHrefs(taskResult, self.unvisitedHrefs, self.visitedHrefs)
 
-    def getTaskResult(self):
-        return self.resultQueue.get()  #这里或者会Blocked掉,因此主线程就不会一直跑
+            logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (self.__currentDepth__, self.totalLinks))
+            print('-----Depth %d Finish. Total visited Links: %d-----' % (self.__currentDepth__, self.totalLinks))
+            self.__currentDepth__ += 1
 
-    def stopWorking(self):
+        self.stop()
+
+    def stop(self):
+        print 'Stop Crawling...'
         for i in range(len(self.threadPool)):
-            self.assignTask(None, 'stop')
+            self.__assignTask__(None, 'stop')
         for thread in self.threadPool:
             thread.join()
         del self.threadPool[:]
+
+    def __startInformationTimer__(self):
+        thread = Thread(target=self.__showInfomation__)
+        thread.setDaemon(True)
+        thread.start()
+
+
+    def __showInfomation__(self):
+        while self.threadPool:  
+            print 'Crawling in depth %d; Already visited %d Links; %d tasks remaining in thread pool.' \
+            %(self.__currentDepth__, len(self.visitedHrefs)-self.taskleft(), self.taskleft())  
+            time.sleep(10) 
 
     def __initThreadPool__(self):
         for i in range(self.threadNum):
@@ -78,6 +113,12 @@ class Downloader(object):
             thread.start()
             #self.logger.debug('start thread: %s' % i) #thread 有自己的名称
 
+    def __assignTask__(self,url, command='start'):
+        self.taskQueue.put((command, url))
+
+    def __getTaskResult__(self):
+        return self.resultQueue.get()  #这里或者会Blocked掉,因此主线程就不会一直跑
+
     def __doTasks__(self):
         while True:
             command, url = self.taskQueue.get() #这里也会Blocked
@@ -86,13 +127,13 @@ class Downloader(object):
             try:
                 if command == 'start':
                     self.lock.acquire() #保证操作的原子性，正在运行的线程数+1
-                    self.running = self.running + 1 
+                    self.running += 1 
                     self.lock.release()
 
                     pageSource = self.__getPageSource__(url)
 
                     self.lock.acquire() #正在运行的线程数-1
-                    self.running = self.running - 1
+                    self.running -= 1
                     self.lock.release()
 
                     self.resultQueue.put((url, pageSource))
@@ -101,7 +142,6 @@ class Downloader(object):
                     raise ValueError, 'Unknown command %r' % command
             except Exception,e:
                 self.logger.critical(e)
-
 
     def __getPageSource__(self, url):
         '''
@@ -122,7 +162,7 @@ class Downloader(object):
             #只抓取普通网页，网页为200时再获取源代码 。        
             if response.headers['Content-Type'].find('html') != -1 and response.status_code == requests.codes.ok:
                 self.logger.debug('Get Page from : %s ' % url)
-                print 'Get Page from : %s ' % url
+                #print 'Get Page from : %s ' % url
                 try:
                     return response.text
                 except Exception,e:
@@ -154,7 +194,25 @@ def addUnvisitedHrefs(taskResult, unvisitedHrefs, visitedHrefs):
                 #保证每个链接只访问一次
                 if  href not in unvisitedHrefs and href not in visitedHrefs:
                     unvisitedHrefs.append(href)
-    
+
+# class InfomationTimer(Thread): 
+#     def __init__(self, downloader):  
+#         Thread.__init__(self)  
+#         self.visitedHrefs = visitedHrefs
+#         self.downloader = downloader
+#         self.currentDepth = currentDepth
+#         self.interval = 10  
+#         self.stop = False  
+   
+#     def run(self):
+#         while not self.stop:  
+#             print 'Crawling in depth %d; Already visited %d Links; %d tasks remained in thread pool.' \
+#             %(self.currentDepth, len(self.visitedHrefs)-self.downloader.taskleft(), self.downloader.taskleft())  
+#             time.sleep(self.interval) 
+
+#     def stopThread(self):  
+#         self.stop = True 
+
 
 def main():
     args = parser.parse_args()
@@ -162,32 +220,9 @@ def main():
         args.url = 'http://' + args.url
     loggingConfig(args.logFile, args.logLevel)  #初始化logging 模块
 
-    visitedHrefs = set()    #已访问的链接
-    unvisitedHrefs = deque()    #待访问的链接
-
     downloader = Downloader(args, logger)
-    unvisitedHrefs.append(args.url) #添加首个待访问的链接
-    currentDepth = 1 #标注当前页面深度
-    count = 0   #计算共访问了多少个页面
-    while currentDepth < args.depth+1:
 
-        #若没有需要访问的链接，则break
-        if not unvisitedHrefs:
-            break
-        while unvisitedHrefs:
-            count += 1
-            url = unvisitedHrefs.popleft()
-            downloader.assignTask(url)  #分配下载任务
-            visitedHrefs.add(url)
-        while downloader.taskleft():
-            taskResult = downloader.getTaskResult()  #这里若没有结果的话，会阻塞
-            addUnvisitedHrefs(taskResult, unvisitedHrefs, visitedHrefs)
-
-        logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (currentDepth, count))
-        print('-----Depth %d Finish. Total visited Links: %d-----' % (currentDepth, count))
-        currentDepth += 1
-
-    downloader.stopWorking()
+    downloader.start()
 
 if __name__ == '__main__':
     main()
