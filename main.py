@@ -53,6 +53,7 @@ class Downloader(object):
         self.__initThreadPool__()   #初始化线程池
 
     def taskleft(self):
+        #print self.taskQueue.qsize(),self.resultQueue.qsize(),self.running
         count = self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
         return count
 
@@ -82,25 +83,25 @@ class Downloader(object):
             command, url = self.taskQueue.get() #这里也会Blocked
             if command == 'stop':
                 break
-            
-            self.lock.acquire() #保证操作的原子性，正在运行的线程数+1
-            self.running = self.running + 1 
-            self.lock.release()
             try:
                 if command == 'start':
+                    self.lock.acquire() #保证操作的原子性，正在运行的线程数+1
+                    self.running = self.running + 1 
+                    self.lock.release()
+
                     pageSource = self.__getPageSource__(url)
+
+                    self.lock.acquire() #正在运行的线程数-1
+                    self.running = self.running - 1
+                    self.lock.release()
+
                     self.resultQueue.put((url, pageSource))
+                    self.taskQueue.task_done()
                 else:
                     raise ValueError, 'Unknown command %r' % command
             except Exception,e:
                 self.logger.critical(e)
 
-            self.lock.acquire()
-            self.running = self.running - 1
-            self.lock.release()
-
-            self.taskQueue.task_done()
-            
 
     def __getPageSource__(self, url):
         '''
@@ -112,36 +113,38 @@ class Downloader(object):
             'Referer': url,
         }
         try:
+            #发出请求。参数设置了prefetch=False，当访问response.text 时才下载网页内容,避免下载非html文件
             response = requests.get(url, headers=headers, timeout=10, prefetch=False)
         except Exception,e:
-            self.logger.error(str(e) + '\nURL: %s' % url)
+            #有可能网络连接出错，也有可能是网页无法访问(超时)
+            self.logger.error(str(e) + ' URL: %s' % url)
         else:
-            #只抓取普通网页，避免访问图像或其它文件的链接。网页为200时再获取源代码 。设置了prefetch=False，当访问text 时才下载网页内容        
+            #只抓取普通网页，网页为200时再获取源代码 。        
             if response.headers['Content-Type'].find('html') != -1 and response.status_code == requests.codes.ok:
                 self.logger.debug('Get Page from : %s ' % url)
                 print 'Get Page from : %s ' % url
                 try:
                     return response.text
                 except Exception,e:
-                    self.logger.error(e)
+                    self.logger.error(str(e) + ' URL: %s' % url)
+            elif response.headers['Content-Type'].find('html') == -1:
+                self.logger.debug('Not a normal Html page for %s' % url)
+            elif response.status_code != requests.codes.ok:
+                self.logger.debug('Page cannot be visited successfully. Status Code:%d. URL:%s' % (response.status_code, url))
         return None
 
 
-def getHrefs(taskResult, unvisitedHrefs, visitedHrefs):
+def addUnvisitedHrefs(taskResult, unvisitedHrefs, visitedHrefs):
     '''
     解析html源码，获取其中的链接。 url参数用于处理相对链接。
     '''
     url, pageSource = taskResult
-    if pageSource == None or pageSource == '':
-        #网页内容为空,或网页地址为html以为的其它页面
-        logger.warning('Page may contain NOTHING, or it\'s not a normal Html page for %s' % url)
-        return None
-    else:
+    if pageSource != None and pageSource != '':
         soup = BeautifulSoup(pageSource)
         #使用bs4查找页面内所有带链接的<a>标签
         results = soup.find_all('a',href=True)
         for a in results:
-            #必须将链接encode为utf8, 因为中文文件链接如 http://aa.com/文件.pdf 不会被自动url编码，从而导致encodeException
+            #必须将链接encode为utf8, 因为中文文件链接如 http://aa.com/文件.pdf 在bs4中不会被自动url编码，从而导致encodeException
             href = a.get('href').encode('utf8')
             #处理相对链接的问题
             if not href.startswith('http'):
@@ -167,20 +170,21 @@ def main():
     currentDepth = 1 #标注当前页面深度
     count = 0   #计算共访问了多少个页面
     while currentDepth < args.depth+1:
+
+        #若没有需要访问的链接，则break
+        if not unvisitedHrefs:
+            break
         while unvisitedHrefs:
-            print 'while 11111 begin'
             count += 1
             url = unvisitedHrefs.popleft()
-            print url,'!!!'
             downloader.assignTask(url)  #分配下载任务
             visitedHrefs.add(url)
         while downloader.taskleft():
-            print 'while 22222 begin'
             taskResult = downloader.getTaskResult()  #这里若没有结果的话，会阻塞
-            print 'taskResult Block!!'
-            getHrefs(taskResult, unvisitedHrefs, visitedHrefs)
+            addUnvisitedHrefs(taskResult, unvisitedHrefs, visitedHrefs)
 
-        logger.debug('-----Depth %d Finish. all connections: %d-----' % (currentDepth, count))
+        logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (currentDepth, count))
+        print('-----Depth %d Finish. Total visited Links: %d-----' % (currentDepth, count))
         currentDepth += 1
 
     downloader.stopWorking()
