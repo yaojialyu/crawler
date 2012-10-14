@@ -1,6 +1,4 @@
 #coding:utf8
-#Author:lvyaojia
-#Date:2012.9.23
 
 from threading import Thread, Lock
 from Queue import Queue
@@ -11,18 +9,9 @@ import time
 from bs4 import BeautifulSoup 
 from urlparse import urljoin,urlparse
 from collections import deque
-from urllib2 import quote
 
 
-#logger 为全局变量——线程安全
-#The logging module is intended to be thread-safe without any special work 
-#needing to be done by its clients. It achieves this though using threading 
-#locks; there is one lock to serialize access to the module’s shared data, and 
-#each handler also creates a lock to serialize access to its underlying I/O.
-logger = logging.getLogger()
-
-
-def loggingConfig(logFile, logLevel):
+def loggingConfig(logger, logFile, logLevel):
     '''
     配置logging的日志文件以及日志的记录等级
     '''
@@ -34,16 +23,16 @@ def loggingConfig(logFile, logLevel):
         5:logging.DEBUG,#数字最大记录最详细
         }
 
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+    formatter = logging.Formatter('%(asctime)s %(threadName)s %(levelname)s %(message)s')
     fileHandler = logging.FileHandler(logFile)
     fileHandler.setFormatter(formatter)
     logger.addHandler(fileHandler)
     logger.setLevel(LEVELS.get(logLevel))
 
 
-class Downloader(object):
+class Crawler(object):
     def __init__(self, args, logger):
-        self.depth = args.depth  #指定的网页深度
+        self.depth = args.depth  #指定网页深度
         self.taskQueue = Queue() #下载任务队列
         self.resultQueue = Queue() #完成队列
         self.threadNum = args.threadNum #线程数
@@ -51,37 +40,35 @@ class Downloader(object):
         self.lock = Lock() #线程锁
         self.logger = logger #logging
         self.running = 0    #正在运行的线程数
-        self.__currentDepth__ = 1  #标注当前网页深度
-        self.__initThreadPool__()   #初始化线程池
+        self.currentDepth = 1  #标注当前网页深度
         self.visitedHrefs = set()    #已访问的链接
         self.unvisitedHrefs = deque()    #待访问的链接
         self.unvisitedHrefs.append(args.url) #添加首个待访问的链接
         self.totalLinks = 0   #记录共访问了多少个页面
+        self.__initThreadPool__()   #初始化线程池
 
-    def taskleft(self):
-        #print self.taskQueue.qsize(),self.resultQueue.qsize(),self.running
-        count = self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
-        return count
 
     def start(self):
         print 'Start Crawling...'
         self.__startInformationTimer__()
-        while self.__currentDepth__ < self.depth+1:
-            #若没有需要访问的链接，则break
+        while self.currentDepth < self.depth+1:
+            #若没有需要访问的链接时，则直接break,防止达不到depth要求时，进程阻塞
             if not self.unvisitedHrefs:
                 break
+            #将某个网页深度的所有链接都分配给任务队列
             while self.unvisitedHrefs:
                 self.totalLinks += 1
-                url = self.unvisitedHrefs.popleft()
+                url = self.unvisitedHrefs.popleft()     #BFS算法
                 self.__assignTask__(url)  #分配下载任务
                 self.visitedHrefs.add(url)
+            #获取某个深度的所有网页以及其包含的链接
             while self.taskleft():
                 taskResult = self.__getTaskResult__()  #这里若没有结果的话，会阻塞
-                addUnvisitedHrefs(taskResult, self.unvisitedHrefs, self.visitedHrefs)
-
-            logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (self.__currentDepth__, self.totalLinks))
-            print('-----Depth %d Finish. Total visited Links: %d-----' % (self.__currentDepth__, self.totalLinks))
-            self.__currentDepth__ += 1
+                self.addUnvisitedHrefsFromTaskResult(taskResult) 
+            #当以上两个循环完成时，即代表爬完了一个网页深度
+            logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (self.currentDepth, self.totalLinks))
+            print('-----Depth %d Finish. Total visited Links: %d-----' % (self.currentDepth, self.totalLinks))
+            self.currentDepth += 1
 
         self.stop()
 
@@ -93,60 +80,13 @@ class Downloader(object):
             thread.join()
         del self.threadPool[:]
 
-    def __startInformationTimer__(self):
-        thread = Thread(target=self.__showInfomation__)
-        thread.setDaemon(True)
-        thread.start()
+    def taskleft(self):
+        '''返回当前所有任务数'''
+        count = self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
+        return count
 
-
-    def __showInfomation__(self):
-        while self.threadPool:  
-            print 'Crawling in depth %d; Already visited %d Links; %d tasks remaining in thread pool.' \
-            %(self.__currentDepth__, len(self.visitedHrefs)-self.taskleft(), self.taskleft())  
-            time.sleep(10) 
-
-    def __initThreadPool__(self):
-        for i in range(self.threadNum):
-            thread = Thread(target=self.__doTasks__)
-            thread.setDaemon(True)
-            self.threadPool.append(thread)
-            thread.start()
-            #self.logger.debug('start thread: %s' % i) #thread 有自己的名称
-
-    def __assignTask__(self,url, command='start'):
-        self.taskQueue.put((command, url))
-
-    def __getTaskResult__(self):
-        return self.resultQueue.get()  #这里或者会Blocked掉,因此主线程就不会一直跑
-
-    def __doTasks__(self):
-        while True:
-            command, url = self.taskQueue.get() #这里也会Blocked
-            if command == 'stop':
-                break
-            try:
-                if command == 'start':
-                    self.lock.acquire() #保证操作的原子性，正在运行的线程数+1
-                    self.running += 1 
-                    self.lock.release()
-
-                    pageSource = self.__getPageSource__(url)
-
-                    self.lock.acquire() #正在运行的线程数-1
-                    self.running -= 1
-                    self.lock.release()
-
-                    self.resultQueue.put((url, pageSource))
-                    self.taskQueue.task_done()
-                else:
-                    raise ValueError, 'Unknown command %r' % command
-            except Exception,e:
-                self.logger.critical(e)
-
-    def __getPageSource__(self, url):
-        '''
-        根据url,获取html源代码
-        '''
+    def getPageSource(self, url):
+        '''根据url,获取html源代码'''
         #自定义header,防止被禁,某些情况如豆瓣,还需制定cookies
         headers = {
             'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/536.5 (KHTML, like Gecko) Chrome/19.0.1084.52 Safari/536.5',
@@ -173,56 +113,86 @@ class Downloader(object):
                 self.logger.debug('Page cannot be visited successfully. Status Code:%d. URL:%s' % (response.status_code, url))
         return None
 
+    def addUnvisitedHrefsFromTaskResult(self, taskResult):
+        '''解析html源码，获取其中的链接。'''
+        url, pageSource = taskResult
+        if pageSource != None and pageSource != '':
+            soup = BeautifulSoup(pageSource)
+            #使用bs4查找页面内所有带链接的<a>标签
+            results = soup.find_all('a',href=True)
+            for a in results:
+                #必须将链接encode为utf8, 因为中文文件链接如 http://aa.com/文件.pdf 在bs4中不会被自动url编码，从而导致encodeException
+                href = a.get('href').encode('utf8')
+                #处理相对链接的问题
+                if not href.startswith('http'):
+                    href = urljoin(url, href)
+                #只获取http或https网页,去除如ftp://这样的链接
+                if urlparse(href).scheme == 'http' or urlparse(href).scheme == 'https':
+                    #保证每个链接只访问一次
+                    if  href not in self.unvisitedHrefs and href not in self.visitedHrefs:
+                        self.unvisitedHrefs.append(href)
 
-def addUnvisitedHrefs(taskResult, unvisitedHrefs, visitedHrefs):
-    '''
-    解析html源码，获取其中的链接。 url参数用于处理相对链接。
-    '''
-    url, pageSource = taskResult
-    if pageSource != None and pageSource != '':
-        soup = BeautifulSoup(pageSource)
-        #使用bs4查找页面内所有带链接的<a>标签
-        results = soup.find_all('a',href=True)
-        for a in results:
-            #必须将链接encode为utf8, 因为中文文件链接如 http://aa.com/文件.pdf 在bs4中不会被自动url编码，从而导致encodeException
-            href = a.get('href').encode('utf8')
-            #处理相对链接的问题
-            if not href.startswith('http'):
-                href = urljoin(url, href)
-            #只获取http或https网页,去除如ftp://这样的链接
-            if urlparse(href).scheme == 'http' or urlparse(href).scheme == 'https':
-                #保证每个链接只访问一次
-                if  href not in unvisitedHrefs and href not in visitedHrefs:
-                    unvisitedHrefs.append(href)
+    def __startInformationTimer__(self):
+        '''创建新线程，每隔10秒在屏幕上打印进度信息'''
+        thread = Thread(target=self.__showInfomation__)
+        thread.setDaemon(True)
+        thread.start()
 
-# class InfomationTimer(Thread): 
-#     def __init__(self, downloader):  
-#         Thread.__init__(self)  
-#         self.visitedHrefs = visitedHrefs
-#         self.downloader = downloader
-#         self.currentDepth = currentDepth
-#         self.interval = 10  
-#         self.stop = False  
-   
-#     def run(self):
-#         while not self.stop:  
-#             print 'Crawling in depth %d; Already visited %d Links; %d tasks remained in thread pool.' \
-#             %(self.currentDepth, len(self.visitedHrefs)-self.downloader.taskleft(), self.downloader.taskleft())  
-#             time.sleep(self.interval) 
+    def __showInfomation__(self):
+        while self.threadPool:  
+            print 'Crawling in depth %d; Already visited %d Links; %d tasks remaining in thread pool.' \
+            %(self.currentDepth, len(self.visitedHrefs)-self.taskleft(), self.taskleft())  
+            time.sleep(10) 
 
-#     def stopThread(self):  
-#         self.stop = True 
+    def __initThreadPool__(self):
+        #初始化线程池
+        for i in range(self.threadNum):
+            thread = Thread(target=self.__doTasks__)
+            thread.setDaemon(True)
+            self.threadPool.append(thread)
+            thread.start()
+
+    def __assignTask__(self,url, command='start'):
+        self.taskQueue.put((command, url))  #分配任务,command为start或stop
+
+    def __getTaskResult__(self):
+        return self.resultQueue.get()  #这里会Blocked,直到拿到网页源码为止
+
+    def __doTasks__(self):
+        while True:
+            command, url = self.taskQueue.get() #这里也会Blocked
+            if command == 'stop':
+                break
+            try:
+                if command == 'start':
+                    self.lock.acquire() #保证操作的原子性，正在运行的线程数+1
+                    self.running += 1 
+                    self.lock.release()
+
+                    pageSource = self.getPageSource(url)  #获取网页源码
+
+                    self.lock.acquire() #正在运行的线程数-1
+                    self.running -= 1
+                    self.lock.release()
+
+                    self.resultQueue.put((url, pageSource))  #将源码结果放入完成队列
+                    self.taskQueue.task_done()
+                else:
+                    raise ValueError, 'Unknown command %r' % command
+            except Exception,e:
+                self.logger.critical(e)
 
 
 def main():
     args = parser.parse_args()
     if not args.url.startswith('http'):
         args.url = 'http://' + args.url
-    loggingConfig(args.logFile, args.logLevel)  #初始化logging 模块
 
-    downloader = Downloader(args, logger)
+    logger = logging.getLogger()
+    loggingConfig(logger, args.logFile, args.logLevel)  #初始化logging 模块
 
-    downloader.start()
+    crawler = Crawler(args, logger)
+    crawler.start()
 
 if __name__ == '__main__':
     main()
