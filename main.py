@@ -12,9 +12,7 @@ from collections import deque
 
 
 def loggingConfig(logger, logFile, logLevel):
-    '''
-    配置logging的日志文件以及日志的记录等级
-    '''
+    '''配置logging的日志文件以及日志的记录等级'''
     LEVELS={
         1:logging.CRITICAL, 
         2:logging.ERROR,
@@ -47,9 +45,8 @@ class Crawler(object):
         self.totalLinks = 0   #记录共访问了多少个页面
         self.__initThreadPool__()   #初始化线程池
 
-
     def start(self):
-        print 'Start Crawling...'
+        print '\nStart Crawling\n'
         self.__startInformationTimer__()
         while self.currentDepth < self.depth+1:
             #若没有需要访问的链接时，则直接break,防止达不到depth要求时，进程阻塞
@@ -58,7 +55,7 @@ class Crawler(object):
             #将某个网页深度的所有链接都分配给任务队列
             while self.unvisitedHrefs:
                 self.totalLinks += 1
-                url = self.unvisitedHrefs.popleft()     #BFS算法
+                url = self.unvisitedHrefs.popleft()     #BFS
                 self.__assignTask__(url)  #分配下载任务
                 self.visitedHrefs.add(url)
             #获取某个深度的所有网页以及其包含的链接
@@ -66,14 +63,14 @@ class Crawler(object):
                 taskResult = self.__getTaskResult__()  #这里若没有结果的话，会阻塞
                 self.addUnvisitedHrefsFromTaskResult(taskResult) 
             #当以上两个循环完成时，即代表爬完了一个网页深度
-            logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (self.currentDepth, self.totalLinks))
-            print('-----Depth %d Finish. Total visited Links: %d-----' % (self.currentDepth, self.totalLinks))
+            self.logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (self.currentDepth, self.totalLinks))
+            print('Depth %d Finish. Total visited Links:%d\n' % (self.currentDepth, self.totalLinks))
             self.currentDepth += 1
 
         self.stop()
 
     def stop(self):
-        print 'Stop Crawling...'
+        print 'Stop Crawling\n'
         for i in range(len(self.threadPool)):
             self.__assignTask__(None, 'stop')
         for thread in self.threadPool:
@@ -140,9 +137,13 @@ class Crawler(object):
 
     def __showInfomation__(self):
         while self.threadPool:  
-            print 'Crawling in depth %d; Already visited %d Links; %d tasks remaining in thread pool.' \
-            %(self.currentDepth, len(self.visitedHrefs)-self.taskleft(), self.taskleft())  
-            time.sleep(10) 
+            print '-------------------------------------------'
+            print 'Crawling in depth %d' % self.currentDepth
+            print 'Already visited %d Links' % (len(self.visitedHrefs)-self.taskleft())
+            print '%d tasks remaining in thread pool.' % self.taskleft()
+            print '-------------------------------------------\n'
+            time.sleep(10)
+                
 
     def __initThreadPool__(self):
         #初始化线程池
@@ -189,7 +190,7 @@ def main():
         args.url = 'http://' + args.url
 
     logger = logging.getLogger()
-    loggingConfig(logger, args.logFile, args.logLevel)  #初始化logging 模块
+    loggingConfig(logger, args.logFile, args.logLevel) 
 
     crawler = Crawler(args, logger)
     crawler.start()
