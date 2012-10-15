@@ -1,6 +1,4 @@
 #coding:utf8
-#Author:lvyaojia
-#Date:2012.9.23
 
 import argparse 
 
