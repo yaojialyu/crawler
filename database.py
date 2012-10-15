@@ -12,7 +12,7 @@ class Database(object):
                             keyword TEXT)''')
 
     def saveData(self, url, pageSource, keyword=''):
-        sql='''insert into Webpage (url, pageSource, keyword) values (?, ?, ?);'''
+        sql='''INSERT INTO Webpage (url, pageSource, keyword) VALUES (?, ?, ?);'''
         self.conn.execute(sql, (url, pageSource, keyword) )
 
     def close(self):
