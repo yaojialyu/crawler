@@ -3,11 +3,6 @@ crawler
 
 A Web crawler for Knownsec.
 
-The following parts are under construction:  
-- multi-thread
-- database
-- keyword
-
 usage
 -------------
 ```shell
