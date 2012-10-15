@@ -1,15 +1,15 @@
 #coding:utf8
 
-from threading import Thread, Lock
-from Queue import Queue
-from options import parser
 import logging
 import requests
 import time
+from threading import Thread, Lock
+from Queue import Queue
+from options import parser
+from database import Database
 from bs4 import BeautifulSoup 
 from urlparse import urljoin,urlparse
 from collections import deque
-
 
 def loggingConfig(logger, logFile, logLevel):
     '''配置logging的日志文件以及日志的记录等级'''
@@ -31,13 +31,17 @@ class Crawler(object):
     def __init__(self, logger, args):
         self.depth = args.depth  #指定网页深度
         self.threadNum = args.threadNum #指定线程数
+        self.keyword = args.keyword #指定关键词
+        self.database = Database(args.dbFile) #数据库
         self.lock = Lock() #线程锁
-        self.logger = logger #logging
-        self.running = 0    #正在运行的线程数
-        self.currentDepth = 1  #标注当前网页深度
+        self.logger = logger #日志记录
+        self.running = 0    #正在run的线程数
+        self.currentDepth = 1  #标注初始爬虫深度，从1开始，非0开始
         self.visitedHrefs = set()    #已访问的链接
         self.unvisitedHrefs = deque()    #待访问的链接
         self.unvisitedHrefs.append(args.url) #添加首个待访问的链接
+        self.taskQueue = Queue() #下载任务队列
+        self.resultQueue = Queue() #下载任务结果队列
         self._initThreadPool()   #初始化线程池
 
     def start(self):
@@ -45,19 +49,19 @@ class Crawler(object):
         self._startPrintProgress()   #在Terminal定时打印信息
 
         while self.currentDepth < self.depth+1:
-            #若没有需要访问的链接时，break,防止网页没那么深，达不到depth要求时，线程阻塞
+            #若没有需要访问的链接时break,防止网页没那么深，达不到depth要求时，造成阻塞
             if not self.unvisitedHrefs:
                 break
-            #将当前网页深度的所有链接都分配给任务队列
+            #将当前深度的所有链接都分配给任务队列
             self._assignUnvisitedHrefs()
-            #从结果队列中获取当前深度的所有网页以及其包含的链接
+            #从结果队列中获取当前深度的所有网页以及其包含的下个深度的链接
             self._handelTaskResults()
             #当以上两个任务完成时，即代表爬完了一个网页深度
             self.logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (self.currentDepth, len(self.visitedHrefs)))
             print('Depth %d Finish. Totally visited %d Links\n' % (self.currentDepth, len(self.visitedHrefs)))
+            #迈进下一个爬虫深度啦～～～
             self.currentDepth += 1
-
-        self._stopThreads()
+        self.stop()
 
     def _assignUnvisitedHrefs(self):
         while self.unvisitedHrefs:
@@ -67,18 +71,24 @@ class Crawler(object):
 
     def _handelTaskResults(self):
         while self.getTaskLeft():
-            #从结果队列获取并处理结果，添加未访问的链接
+            #从结果队列获取并处理结果
             #若没有结果的话，会阻塞,直到线程下载完网页
-            taskResult = self._getTaskResult()  
-            self.addUnvisitedHrefs(taskResult) 
+            url, pageSource = self._getTaskResult() 
+            #存放到数据库 这里没有使用多线程访问sqlite,因为不需要 
+            if self.keyword:
+                if pageSource.find(self.keyword) !=-1:
+                    self.database.saveData(url, pageSource, self.keyword) 
+            else:
+                self.database.saveData(url, pageSource)
+            #添加未访问的链接(先解析页面)
+            self.addUnvisitedHrefs(url, pageSource) 
 
     def getTaskLeft(self):
         '''返回当前所有任务数'''
         return self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
 
-    def addUnvisitedHrefs(self, taskResult):
+    def addUnvisitedHrefs(self, url, pageSource):
         '''过滤url,并将有效的url放进UnvisitedHrefs列表'''
-        url, pageSource = taskResult
         if pageSource != None and pageSource != '':
             hrefs = self._getAllHrefsFromPage(url, pageSource)
             #对链接进行过滤:1.只获取http或https网页;2.保证每个链接只访问一次
@@ -132,15 +142,13 @@ class Crawler(object):
                 
     def _initThreadPool(self):
         self.threadPool = [] #线程池
-        self.taskQueue = Queue() #下载任务队列
-        self.resultQueue = Queue() #完成队列
         for i in range(self.threadNum):
             thread = Thread(target=self._doTasks)
             thread.setDaemon(True)
             self.threadPool.append(thread)
             thread.start()
 
-    def _stopThreads(self):
+    def stop(self):
         '''停止所有线程'''
         print 'Stop Crawling\n'
         for i in range(len(self.threadPool)):
@@ -148,6 +156,7 @@ class Crawler(object):
         for thread in self.threadPool:
             thread.join()
         del self.threadPool[:]
+        self.database.close()
 
     def _assignTask(self,url, command='start'):
         self.taskQueue.put((command, url))  #分配任务,command为start或stop

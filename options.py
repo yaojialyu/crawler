@@ -7,6 +7,7 @@ _default = dict(
     dbFile = 'data.sql',
     loglevel = 3,
     threadNum = 10,
+    keyword = '',
     )
 
 parser = argparse.ArgumentParser(description='A Web crawler for Knownsec') 
@@ -29,7 +30,7 @@ parser.add_argument('--thread', type=int, metavar='NUM', default=_default['threa
 parser.add_argument('--dbfile', type=str, metavar='FILE', default=_default['dbFile'], dest='dbFile',
                    help='The SQLite file path. Default:%s' % _default['dbFile'])
 
-parser.add_argument('--key', type=str, metavar='KEYWORD', dest='keyword',
+parser.add_argument('--key', type=str, metavar='KEYWORD', default=_default['keyword'], dest='keyword',
                    help='The keyword for crawling')
 
 parser.add_argument('--testself',action='store_true',dest='testSelf',
