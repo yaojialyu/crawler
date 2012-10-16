@@ -198,28 +198,30 @@ class Crawler(object):
         '''根据url,获取html源代码'''
         #自定义header,防止被禁,某些情况如豆瓣,还需制定cookies,否则被ban
         #设置了prefetch=False，当访问response.text 时才下载网页内容,避免下载非html文件
-        #只抓取普通网页，网页为200时再获取源代码 。
         headers = {
             'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
             'Referer': url,
         }
-        try:
-            #TODO 超时没有重试,这里或许需要更改.超时重试3次
-            response = requests.get(url, headers=headers, timeout=15, prefetch=False)
-        except Exception,e:
-            logger.error(str(e) + ' URL: %s' % url)
-        else:  
-            if response.headers['Content-Type'].find('html') != -1 and response.status_code == requests.codes.ok:
-                logger.debug('Get Page from : %s ' % url)
-                try:
+        for i in range(3):#超时重试3次
+            try:
+                response = requests.get(url, headers=headers, timeout=10, prefetch=False)
+                if _isResponseAvaliable(response, url):
+                    logger.debug('Get Page from : %s ' % url)
                     return url, response.text
-                except Exception,e:
-                    logger.error(str(e) + ' URL: %s' % url)
-            elif response.headers['Content-Type'].find('html') == -1:
-                logger.debug('Not a normal Html page. URL: %s' % url)
-            elif response.status_code != requests.codes.ok:
-                logger.debug('Page cannot be visited successfully. Status Code:%d. URL:%s' % (response.status_code, url))
+            except Exception,e:
+                logger.error(str(e) + ' URL: %s; Retry:%d;' % (url, i+1))
         return url,None
+
+    def _isResponseAvaliable(self, response, url):
+        #网页为200时再获取源码 。只选取html页面。 
+        if response.status_code == requests.codes.ok:
+            if response.headers['Content-Type'].find('html') != -1:
+                return True
+            else:
+                logger.debug('Not a normal Html page. URL: %s' % url)
+        else:
+            logger.debug('Page cannot be visited successfully. Status Code:%d. URL:%s' % (response.status_code, url))
+        return False
 
 logger = logging.getLogger()
 
