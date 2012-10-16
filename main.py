@@ -27,35 +27,81 @@ def loggingConfig(logger, logFile, logLevel):
     logger.setLevel(LEVELS.get(logLevel))
 
 
+
+class ThreadPool(object):
+    def __init__(self, threadNum):
+        self.pool = [] #线程池
+        self.threadNum = threadNum  #线程数
+        self.lock = Lock() #线程锁
+        self.running = 0    #正在run的线程数
+        self.taskQueue = Queue() #任务队列
+        self.resultQueue = Queue() #结果队列
+    
+    def startThreads(self, callableTarget):
+        for i in range(self.threadNum):
+            thread = Thread(target=callableTarget)
+            thread.setDaemon(True)
+            self.pool.append(thread)
+            thread.start()
+    
+    def stopThreads(self):
+        '''停止所有线程'''
+        for i in range(len(self.pool)):
+            self.putTask('stop', None)
+        for thread in self.pool:
+            thread.join()
+        del self.pool[:]
+    
+    def putTask(self, *args):
+        self.taskQueue.put(args) 
+
+    def getTask(self):
+        return self.taskQueue.get()
+
+    def putTaskResult(self, *args):
+        self.resultQueue.put(args)
+
+    def getTaskResult(self):
+        return self.resultQueue.get()
+
+    def addRunning(self):
+        self.lock.acquire() 
+        self.running += 1 #保证操作的原子性，正在运行的线程数加1
+        self.lock.release()
+
+    def minusRunning(self):
+        self.lock.acquire() 
+        self.running -= 1 
+        self.lock.release()
+
+    def getTaskLeft(self):
+        '''返回当前所有任务数'''
+        return self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
+
 class Crawler(object):
     def __init__(self, logger, args):
         self.depth = args.depth  #指定网页深度
-        self.threadNum = args.threadNum #指定线程数
-        self.keyword = args.keyword #指定关键词
+        self.keyword = args.keyword.decode('utf8') #指定关键词 #TODO,这里可能会出问题，因为win平台是gbk
         self.database = Database(args.dbFile) #数据库
-        self.lock = Lock() #线程锁
         self.logger = logger #日志记录
-        self.running = 0    #正在run的线程数
         self.currentDepth = 1  #标注初始爬虫深度，从1开始，非0开始
         self.visitedHrefs = set()    #已访问的链接
         self.unvisitedHrefs = deque()    #待访问的链接
         self.unvisitedHrefs.append(args.url) #添加首个待访问的链接
-        self.taskQueue = Queue() #下载任务队列
-        self.resultQueue = Queue() #下载任务结果队列
-        self._initThreadPool()   #初始化线程池
+        self.threadPool = ThreadPool(args.threadNum)  #线程池,指定线程数
 
     def start(self):
         print '\nStart Crawling\n'
+        self.threadPool.startThreads(self._doTasks) #启动线程
         self._startPrintProgress()   #在Terminal定时打印信息
-
         while self.currentDepth < self.depth+1:
             #若没有需要访问的链接时break,防止网页没那么深，达不到depth要求时，造成阻塞
             if not self.unvisitedHrefs:
                 break
             #将当前深度的所有链接都分配给任务队列
-            self._assignUnvisitedHrefs()
+            self._assignCurrentDepthTasks()
             #从结果队列中获取当前深度的所有网页以及其包含的下个深度的链接
-            self._handelTaskResults()
+            self._handelCurrentDepthTaskResults()
             #当以上两个任务完成时，即代表爬完了一个网页深度
             self.logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (self.currentDepth, len(self.visitedHrefs)))
             print('Depth %d Finish. Totally visited %d Links\n' % (self.currentDepth, len(self.visitedHrefs)))
@@ -63,29 +109,32 @@ class Crawler(object):
             self.currentDepth += 1
         self.stop()
 
-    def _assignUnvisitedHrefs(self):
+    def stop(self):
+        self.printProgress = False
+        self.threadPool.stopThreads()
+        self.database.close()
+
+    def _assignCurrentDepthTasks(self):
         while self.unvisitedHrefs:
-            url = self.unvisitedHrefs.popleft()    
-            self._assignTask(url)  #向任务队列分配下载任务
+            url = self.unvisitedHrefs.popleft()
+            self.threadPool.putTask('start', url)   #向任务队列分配下载任务
             self.visitedHrefs.add(url)  #标注该链接已被访问
 
-    def _handelTaskResults(self):
-        while self.getTaskLeft():
+    def _handelCurrentDepthTaskResults(self):
+        while self.threadPool.getTaskLeft():
             #从结果队列获取并处理结果
             #若没有结果的话，会阻塞,直到线程下载完网页
-            url, pageSource = self._getTaskResult() 
-            #存放到数据库 这里没有使用多线程访问sqlite,因为不需要 
-            if self.keyword:
-                if pageSource.find(self.keyword) !=-1:
-                    self.database.saveData(url, pageSource, self.keyword) 
-            else:
-                self.database.saveData(url, pageSource)
-            #添加未访问的链接(先解析页面)
-            self.addUnvisitedHrefs(url, pageSource) 
-
-    def getTaskLeft(self):
-        '''返回当前所有任务数'''
-        return self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
+            url, pageSource = self.threadPool.getTaskResult()
+            #有结果才继续处理
+            if pageSource: 
+                #存放到数据库 这里没有使用多线程访问sqlite,因为不需要
+                if self.keyword:
+                    if pageSource.find(self.keyword) !=-1:
+                        self.database.saveData(url, pageSource, self.keyword) 
+                else:
+                    self.database.saveData(url, pageSource)
+                #添加未访问的链接(先解析页面)
+                self.addUnvisitedHrefs(url, pageSource) 
 
     def addUnvisitedHrefs(self, url, pageSource):
         '''过滤url,并将有效的url放进UnvisitedHrefs列表'''
@@ -127,72 +176,35 @@ class Crawler(object):
 
     def _startPrintProgress(self):
         '''创建线程,每隔10秒在屏幕上打印进度信息'''
+        self.printProgress = True
         thread = Thread(target=self._printInfomation)
         thread.setDaemon(True)
         thread.start()
 
     def _printInfomation(self):
-        while self.threadPool:  
+        while self.printProgress:  
             print '-------------------------------------------'
             print 'Crawling in depth %d' % self.currentDepth
-            print 'Already visited %d Links' % (len(self.visitedHrefs)-self.getTaskLeft())
-            print '%d tasks remaining in thread pool.' % self.getTaskLeft()
+            print 'Already visited %d Links' % (len(self.visitedHrefs)-self.threadPool.getTaskLeft())
+            print '%d tasks remaining in thread pool.' % self.threadPool.getTaskLeft()
             print '-------------------------------------------\n'
             time.sleep(10)
                 
-    def _initThreadPool(self):
-        self.threadPool = [] #线程池
-        for i in range(self.threadNum):
-            thread = Thread(target=self._doTasks)
-            thread.setDaemon(True)
-            self.threadPool.append(thread)
-            thread.start()
-
-    def stop(self):
-        '''停止所有线程'''
-        print 'Stop Crawling\n'
-        for i in range(len(self.threadPool)):
-            self._assignTask(None, 'stop')
-        for thread in self.threadPool:
-            thread.join()
-        del self.threadPool[:]
-        self.database.close()
-
-    def _assignTask(self,url, command='start'):
-        self.taskQueue.put((command, url))  #分配任务,command为start或stop
-
-    def _getTask(self):
-        return self.taskQueue.get()
-
-    def _putTaskResult(self,taskResult):
-        self.resultQueue.put(taskResult)
-
-    def _getTaskResult(self):
-        return self.resultQueue.get()
-
     def _doTasks(self):
         while 1:
-            command, url = self._getTask()
+            command, url = self.threadPool.getTask()
             if command == 'stop':   #停止线程工作
                 break
             try:
                 if command == 'start':
-                    self.lock.acquire() #保证操作的原子性，正在运行的线程数加1
-                    self.running += 1 
-                    self.lock.release()
-
-                    pageSource = self._getPageSource(url)  #获取网页源码
-
-                    self.lock.acquire() #下载任务完成，正在运行的线程数减1
-                    self.running -= 1
-                    self.lock.release()
-
-                    self._putTaskResult((url, pageSource))  #将url与源码结果放入完成队列 
+                    self.threadPool.addRunning()
+                    pageSource = self._getPageSource(url)  #获取网页源码,这里下载需要时间
+                    self.threadPool.minusRunning()
+                    self.threadPool.putTaskResult(url, pageSource)  #将url与源码结果放入完成队列 
                 else:
                     raise ValueError, 'Unknown command %r' % command
             except Exception,e:
                 self.logger.critical(e)
-            self.taskQueue.task_done()
 
     def _getPageSource(self, url):
         '''根据url,获取html源代码'''
@@ -203,8 +215,8 @@ class Crawler(object):
         }
         try:
             #发出请求。参数设置了prefetch=False，当访问response.text 时才下载网页内容,避免下载非html文件
-            #TODO 超时没有重试,这里或许需要更改
-            response = requests.get(url, headers=headers, timeout=10, prefetch=False)
+            #TODO 超时没有重试,这里或许需要更改.超时重试3次
+            response = requests.get(url, headers=headers, timeout=15, prefetch=False)
         except Exception,e:
             #有可能网络连接出错，也有可能是网页无法访问(超时)
             self.logger.error(str(e) + ' URL: %s' % url)
@@ -226,12 +238,11 @@ def main():
     args = parser.parse_args()
     if not args.url.startswith('http'):
         args.url = 'http://' + args.url
-
     logger = logging.getLogger()
     loggingConfig(logger, args.logFile, args.logLevel) 
-
     crawler = Crawler(logger, args)
     crawler.start()
+
 
 if __name__ == '__main__':
     main()
