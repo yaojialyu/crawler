@@ -42,7 +42,7 @@ parser.add_argument('--dbfile', type=str, metavar='FILE', default=_default['dbFi
                    help='The SQLite file path. Default:%s' % _default['dbFile'])
 
 parser.add_argument('--key', type=str, metavar='KEYWORD', default=_default['keyword'], dest='keyword',
-                   help='The keyword for crawling')
+                   help='The keyword for crawling. Default: None. For more then one word, quote them. example: --key \'Hello world\'')
 
 parser.add_argument('--testself',action='store_true',dest='testSelf',
                    help='Crawler self test')

@@ -3,6 +3,7 @@
 import logging
 import requests
 import time
+import re
 from threading import Thread, Lock
 from Queue import Queue,Empty
 from options import parser
@@ -32,9 +33,10 @@ class Worker(Thread):
                 continue
             try:
                 self.threadPool.increaseRunsNum()  
-                result = func(*args, **kargs) #这里放容易阻塞线程的任务，在这下载web
+                result = func(*args, **kargs) #这里放容易阻塞线程的任务, 下载任务，文件IO
                 self.threadPool.decreaseRunsNum()
-                self.threadPool.putTaskResult(*result)
+                if result:
+                    self.threadPool.putTaskResult(*result)
             except Exception, e: 
                 logger.error(str(e))
 
@@ -97,17 +99,18 @@ class Crawler(object):
 
     def start(self):
         print '\nStart Crawling\n'
-        self.threadPool.startThreads() #启动线程池
-        self._startPrintProgress()   #在Terminal定时打印信息
+        self.threadPool.startThreads() 
+        self._startPrintProgress()   
         while self.currentDepth < self.depth+1:
             #没有需要访问的链接时就停下
             if not self.unvisitedHrefs:
                 break
-            #分配任务,并发下载当前深度的所有页面
+            #分配任务,线程池并发下载当前深度的所有页面（该操作不阻塞）
             self._assignCurrentDepthTasks()
-            #处理当前深度的所有页面
-            self._handelCurrentDepthTaskResults()
-            #当以上两个任务完成时，即代表爬完了一个网页深度
+            #等待当前线程池完成所有任务
+            while self.threadPool.getTaskLeft():
+                continue
+            #当池内的所有任务完成时，即代表爬完了一个网页深度
             logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (self.currentDepth, len(self.visitedHrefs)))
             print('Depth %d Finish. Totally visited %d Links\n' % (self.currentDepth, len(self.visitedHrefs)))
             #迈进下一个深度
@@ -115,41 +118,71 @@ class Crawler(object):
         self.stop()
 
     def stop(self):
+        print 'Stopping...\n'
         self.printProgress = False
         self.threadPool.stopThreads()
         self.database.close()
-        print 'Finish! Stop Crawling.\n'
 
     def _assignCurrentDepthTasks(self):
         while self.unvisitedHrefs:
             url = self.unvisitedHrefs.popleft()
-            self.threadPool.putTask(self._getPageSource, url)   #向任务队列分配下载任务
-            self.visitedHrefs.add(url)  #标注该链接已被访问
+            self.threadPool.putTask(self._taskHandler, url)   #向任务队列分配任务
+            self.visitedHrefs.add(url)  #标注该链接已被访问,或即将被访问,防止重复访问相同链接
+ 
+    def _taskHandler(self, url):
+        #先拿网页源码，再保存,两个都是高阻塞的操作，交给线程
+        pageSource = self._getPageSource(url)
+        if pageSource:
+            self._saveTaskResults(url, pageSource)
+            self._addUnvisitedHrefs(url, pageSource)
 
-    def _handelCurrentDepthTaskResults(self):
-        '''从结果队列获取并处理结果（保存网页，抽取网页上有效的链接）'''
-        #只要线程池还有任务，就继续处理
-        while self.threadPool.getTaskLeft():
-            #一旦有线程下载完，就立刻拿出结果来处理
-            url, pageSource = self.threadPool.getTaskResult()
-            if pageSource: 
-                if self.keyword:
-                    if pageSource.find(self.keyword) !=-1:
-                        self.database.saveData(url, pageSource, self.keyword) 
+    def _getPageSource(self, url):
+        '''根据url,获取html源代码'''
+        #自定义header,防止被禁,某些情况如豆瓣,还需制定cookies,否则被ban
+        #设置了prefetch=False，当访问response.text 时才下载网页内容,避免下载非html文件
+        headers = {
+            'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
+            'Referer': url,
+        }
+        for i in range(2):#若超时则重试
+            try:
+                response = requests.get(url, headers=headers, timeout=10, prefetch=False)
+                if self._isResponseAvaliable(response, url):
+                    logger.debug('Get Page from : %s ' % url)
+                    return response.text
                 else:
-                    self.database.saveData(url, pageSource)
-                #添加未访问的链接
-                self._addUnvisitedHrefs(url, pageSource) 
+                    logger.warning('Page not avaliable. Status code:%d URL: %s' % (response.status_code, url) )
+                    break
+            except Exception,e:
+                if i == 1:
+                    logger.error(str(e) + ' URL: %s;' % (url))
+        return None
+
+    def _isResponseAvaliable(self, response, url):
+        #网页为200时再获取源码 。只选取html页面。 
+        if response.status_code == requests.codes.ok:
+            if response.headers['Content-Type'].find('html') != -1:
+                return True
+        return False
+
+    def _saveTaskResults(self, url, pageSource):
+        try:
+            #使用正则的search比两者使用lower()后再查找要高效率
+            if self.keyword and re.search(self.keyword, pageSource, re.I):
+                self.database.saveData(url, pageSource, self.keyword) 
+            else:
+                self.database.saveData(url, pageSource)
+        except Exception, e:
+            logger.error(str(e) + 'URL: %s ' % url)
 
     def _addUnvisitedHrefs(self, url, pageSource):
-        '''过滤url,并将有效的url放进UnvisitedHrefs列表'''
+        '''添加未访问的链接。将有效的url放进UnvisitedHrefs列表'''
         #对链接进行过滤:1.只获取http或https网页;2.保证每个链接只访问一次
-        if pageSource != None and pageSource != '':
-            hrefs = self._getAllHrefsFromPage(url, pageSource)
-            for href in hrefs:
-                if self._isHttpOrHttpsProtocol(href):
-                    if not self._isHrefRepeated(href):
-                        self.unvisitedHrefs.append(href)
+        hrefs = self._getAllHrefsFromPage(url, pageSource)
+        for href in hrefs:
+            if self._isHttpOrHttpsProtocol(href):
+                if not self._isHrefRepeated(href):
+                    self.unvisitedHrefs.append(href)
 
     def _getAllHrefsFromPage(self, url, pageSource):
         '''解析html源码，获取页面所有链接。返回链接列表'''
@@ -194,35 +227,6 @@ class Crawler(object):
             print '-------------------------------------------\n'
             time.sleep(10)
 
-    def _getPageSource(self, url):
-        '''根据url,获取html源代码'''
-        #自定义header,防止被禁,某些情况如豆瓣,还需制定cookies,否则被ban
-        #设置了prefetch=False，当访问response.text 时才下载网页内容,避免下载非html文件
-        headers = {
-            'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
-            'Referer': url,
-        }
-        for i in range(3):#超时重试3次
-            try:
-                response = requests.get(url, headers=headers, timeout=10, prefetch=False)
-                if _isResponseAvaliable(response, url):
-                    logger.debug('Get Page from : %s ' % url)
-                    return url, response.text
-            except Exception,e:
-                logger.error(str(e) + ' URL: %s; Retry:%d;' % (url, i+1))
-        return url,None
-
-    def _isResponseAvaliable(self, response, url):
-        #网页为200时再获取源码 。只选取html页面。 
-        if response.status_code == requests.codes.ok:
-            if response.headers['Content-Type'].find('html') != -1:
-                return True
-            else:
-                logger.debug('Not a normal Html page. URL: %s' % url)
-        else:
-            logger.debug('Page cannot be visited successfully. Status Code:%d. URL:%s' % (response.status_code, url))
-        return False
-
 logger = logging.getLogger()
 
 def congifLogger(logFile, logLevel):
@@ -240,10 +244,27 @@ def congifLogger(logFile, logLevel):
     logger.addHandler(fileHandler)
     logger.setLevel(LEVELS.get(logLevel))
 
+def selfTesting():
+    url = ''
+    headers = {
+        'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
+        'Referer': url,
+        }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+    except Exception, e:
+        raise
+    else:
+        pass
+    finally:
+        pass
+    
+
 def main():
     args = parser.parse_args()
     if not args.url.startswith('http'):
         args.url = 'http://' + args.url
+
     congifLogger(args.logFile, args.logLevel)
     crawler = Crawler(args)
     crawler.start()
