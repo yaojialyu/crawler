@@ -25,10 +25,10 @@ class Database(object):
             sql='''INSERT INTO Webpage (url, pageSource, keyword) VALUES (?, ?, ?);'''
             self.conn.execute(sql, (url, pageSource, keyword) )
         else :
-            raise sqlite3.OperationalError
+            raise sqlite3.OperationalError,'Database is not connected. Can not save Data!'
 
     def close(self):
         if self.conn:
             self.conn.close()
         else :
-            raise sqlite3.OperationalError
+            raise sqlite3.OperationalError, 'Database is not connected.'
