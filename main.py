@@ -5,6 +5,7 @@ import requests
 import time
 import re
 import traceback
+from datetime import datetime
 from threading import Thread, Lock
 from Queue import Queue,Empty
 from options import parser
@@ -136,9 +137,6 @@ class Crawler(object):
             self.threadPool.startThreads() 
             self._startPrintProgress()   
             while self.currentDepth < self.depth+1:
-                #没有需要访问的链接时就停下
-                if not self.unvisitedHrefs:
-                    break
                 #分配任务,线程池并发下载当前深度的所有页面（该操作不阻塞）
                 self._assignCurrentDepthTasks()
                 #等待当前线程池完成所有任务
@@ -147,7 +145,7 @@ class Crawler(object):
                     time.sleep(9)
                 #当池内的所有任务完成时，即代表爬完了一个网页深度
                 print 'Depth %d Finish. Totally visited %d links. \n' % (self.currentDepth, len(self.visitedHrefs))
-                logger.info('-----Depth %d Finish. Total visited Links: %d-----' % (self.currentDepth, len(self.visitedHrefs)))
+                logger.info('-----Depth %d Finish. Total visited Links: %d-----\n' % (self.currentDepth, len(self.visitedHrefs)))
                 #迈进下一个深度
                 self.currentDepth += 1
             self.stop()
@@ -182,15 +180,15 @@ class Crawler(object):
         try:
             response = requests.get(url, headers=headers, timeout=10, prefetch=False)
             if self._isResponseAvaliable(response, url):
-                logger.debug('Get Page from : %s ' % url)
+                logger.debug('Get Page from : %s \n' % url)
                 return response.text
             else:
-                logger.warning('Page not avaliable. Status code:%d URL: %s' % (response.status_code, url) )
+                logger.warning('Page not avaliable. Status code:%d URL: %s \n' % (response.status_code, url) )
         except Exception,e:
             if retry>0: #超时重试
                 return self._getPageSource(url, retry-1)
             else:
-                logger.debug(str(e) + ' URL: %s;' % (url))
+                logger.debug(str(e) + ' URL: %s \n' % (url))
                 logger.debug(traceback.format_exc())
         return None
 
@@ -301,7 +299,11 @@ def main():
         print '\nPermission denied: %s' % args.logFile
         print 'Please make sure you have the permission to save the log file!\n'
     else:
+        begin = datetime.now()
         crawler.start()
+        end = datetime.now()
+        print 'Begin:%s \n End:%s ' % (begin,end)
+        print 'Spend time: %s '%(end-begin)
 
 if __name__ == '__main__':
     main()
