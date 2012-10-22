@@ -21,9 +21,14 @@ def positiveInt(rawValue):
     else:
         return value
 
+def url(rawValue):
+    if not rawValue.startswith('http'):
+        value = 'http://' + rawValue
+    return value
+
 parser = argparse.ArgumentParser(description='A Web crawler for Knownsec') 
 
-parser.add_argument('-u', type=str, required=True, metavar='URL', dest='url',
+parser.add_argument('-u', type=url, required=True, metavar='URL', dest='url',
                    help='Specify the begin url')
 
 parser.add_argument('-d', type=positiveInt, required=True, metavar='DEPTH', dest='depth',

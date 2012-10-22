@@ -26,7 +26,8 @@ def congifLogger(logFile, logLevel):
         4:logging.INFO,
         5:logging.DEBUG,#数字最大记录最详细
         }
-    formatter = logging.Formatter('%(asctime)s %(threadName)s %(levelname)s %(message)s')
+    formatter = logging.Formatter(
+        '%(asctime)s %(threadName)s %(levelname)s %(message)s')
     try:
         fileHandler = logging.FileHandler(logFile)
     except IOError, e:
@@ -37,7 +38,9 @@ def congifLogger(logFile, logLevel):
         logger.setLevel(LEVELS.get(logLevel))
         return True
 
+
 class Worker(Thread):
+
     def __init__(self, threadPool):
         Thread.__init__(self)
         self.threadPool = threadPool
@@ -66,7 +69,9 @@ class Worker(Thread):
             except Exception, e:
                 logger.critical(traceback.format_exc())
 
+
 class ThreadPool(object):
+
     def __init__(self, threadNum):
         self.pool = [] #线程池
         self.threadNum = threadNum  #线程数
@@ -89,7 +94,8 @@ class ThreadPool(object):
         self.taskQueue.put((func, args, kargs))
 
     def getTask(self, *args, **kargs):
-        return self.taskQueue.get(*args, **kargs)
+        task = self.taskQueue.get(*args, **kargs)
+        return task
 
     def taskJoin(self, *args, **kargs):
         self.taskQueue.join()
@@ -114,35 +120,39 @@ class ThreadPool(object):
         self.lock.release()
 
     def getTaskLeft(self):
-        #线程池的所有任务包括：taskQueue中未被下载的任务, resultQueue中完成了但是还没被取出的任务, 正在运行的任务（running）
+        #线程池的所有任务包括：
+        #taskQueue中未被下载的任务, resultQueue中完成了但是还没被取出的任务, 正在运行的任务
         #因此任务总数为三者之和
         return self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
 
+
 class Crawler(object):
+
     def __init__(self, args):
         self.depth = args.depth  #指定网页深度
         self.currentDepth = 1  #标注初始爬虫深度，从1开始
-        self.keyword = args.keyword.decode('utf8') #指定关键词 #TODO,这里可能会出问题，因为win平台是gbk
+        self.keyword = args.keyword.decode('utf8') #指定关键词 
         self.database =  Database(args.dbFile)#数据库
         self.threadPool = ThreadPool(args.threadNum)  #线程池,指定线程数
         self.visitedHrefs = set()    #已访问的链接
         self.unvisitedHrefs = deque()    #待访问的链接
         self.unvisitedHrefs.append(args.url) #添加首个待访问的链接
+        self.isCrawling = False
 
     def start(self):
         print '\nStart Crawling\n'
         if not self._isDatabaseAvaliable():
-            print 'Error: Unable to open database file.'
+            print 'Error: Unable to open database file.\n'
         else:
+            self.isCrawling = True
             self.threadPool.startThreads() 
-            self._startPrintProgress()   
             while self.currentDepth < self.depth+1:
                 #分配任务,线程池并发下载当前深度的所有页面（该操作不阻塞）
                 self._assignCurrentDepthTasks()
                 #等待当前线程池完成所有任务
                 #self.threadPool.taskJoin()可代替以下操作，可无法Ctrl-C Interupt
                 while self.threadPool.getTaskLeft():
-                    time.sleep(9)
+                    time.sleep(8)
                 #当池内的所有任务完成时，即代表爬完了一个网页深度
                 print 'Depth %d Finish. Totally visited %d links. \n' % (self.currentDepth, len(self.visitedHrefs))
                 logger.info('-----Depth %d Finish. Total visited Links: %d-----\n' % (self.currentDepth, len(self.visitedHrefs)))
@@ -151,8 +161,7 @@ class Crawler(object):
             self.stop()
 
     def stop(self):
-        print 'Stopping...\n'
-        self.printProgress = False
+        self.isCrawling = False
         self.threadPool.stopThreads()
         self.database.close()
 
@@ -244,21 +253,10 @@ class Crawler(object):
             return True
         return False
 
-    def _startPrintProgress(self):
-        '''创建线程,每隔10秒在屏幕上打印进度信息'''
-        self.printProgress = True
-        thread = Thread(target=self._printInfomation)
-        thread.setDaemon(True)
-        thread.start()
-
-    def _printInfomation(self):
-        while self.printProgress:  
-            print '-------------------------------------------'
-            print 'Crawling in depth %d' % self.currentDepth
-            print 'Already visited %d Links' % (len(self.visitedHrefs)-self.threadPool.getTaskLeft())
-            print '%d tasks remaining in thread pool.' % self.threadPool.getTaskLeft()
-            print '-------------------------------------------\n'
-            time.sleep(10)
+    def getAlreadyVisitedNum(self):
+        #visitedHrefs保存已经分配给taskQueue的链接，有可能链接还在处理中。
+        #因此真实的已访问链接数为visitedHrefs数减去待访问的链接数
+        return len(self.visitedHrefs) - self.threadPool.getTaskLeft()
 
     def _isDatabaseAvaliable(self):
         if self.database.isConn():
@@ -279,31 +277,61 @@ class Crawler(object):
         #数据库测试
         elif not self._isDatabaseAvaliable():
             print 'Please make sure you have the permission to save data: %s\n' % args.dbFile
-        else:
         #保存数据
+        else:
             self._saveTaskResults(url, pageSource)
             print 'Create logfile and database Successfully.'
             print 'Already save Baidu.com, Please check the database record.'
             print 'Seems No Problem!\n'
 
+
+class PrintProgress(Thread):
+    '''每隔10秒在屏幕上打印爬虫进度信息'''
+
+    def __init__(self, crawler):
+        Thread.__init__(self)
+        self.beginTime = datetime.now()
+        self.crawler = crawler
+        self.daemon = True
+
+    def run(self):
+        while 1:
+            if self.crawler.isCrawling:
+                print '-------------------------------------------'
+                print 'Crawling in depth %d' % self.crawler.currentDepth
+                print 'Already visited %d Links' % self.crawler.getAlreadyVisitedNum()
+                print '%d tasks remaining in thread pool.' % self.crawler.threadPool.getTaskLeft()
+                print '-------------------------------------------\n'   
+                time.sleep(10)
+
+    def printSpendingTime(self):
+        self.endTime = datetime.now()
+        print 'Begins at :%s' % self.beginTime
+        print 'Ends at   :%s' % self.endTime
+        print 'Spend time: %s \n'%(self.endTime - self.beginTime)
+        print 'Finish!'
+
+
 def main():
     args = parser.parse_args()
-    if not args.url.startswith('http'):
-        args.url = 'http://' + args.url
-
-    crawler = Crawler(args)
-
     if args.testSelf:
-        crawler.selfTesting(args)
+        Crawler(args).selfTesting(args)
     elif not congifLogger(args.logFile, args.logLevel):
         print '\nPermission denied: %s' % args.logFile
         print 'Please make sure you have the permission to save the log file!\n'
     else:
-        begin = datetime.now()
+        crawler = Crawler(args)
+        printProgress = PrintProgress(crawler)
+        printProgress.start()
         crawler.start()
-        end = datetime.now()
-        print 'Begin:%s \n End:%s ' % (begin,end)
-        print 'Spend time: %s '%(end-begin)
+        printProgress.printSpendingTime()
 
+#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#TODO 把数据库和selfTesting 从爬虫类抽取出来～！
+#TODO 还要整理一下文件权限验证的问题，现在的顺序和组织结构有问题
+#TODO keyword的decode可能会出问题，因为win平台是gbk
+#TODO keyboardInterrupt 的处理？
+#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        
 if __name__ == '__main__':
     main()
