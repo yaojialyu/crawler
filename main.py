@@ -1,18 +1,20 @@
 #coding:utf8
 
 import logging
-import requests
 import time
 import re
 import traceback
 from datetime import datetime
 from threading import Thread, Lock
 from Queue import Queue,Empty
-from options import parser
-from database import Database
-from bs4 import BeautifulSoup 
 from urlparse import urljoin,urlparse
 from collections import deque
+
+import requests
+from bs4 import BeautifulSoup 
+
+from options import parser
+from database import Database
 
 #logger是全局的,线程安全
 logger = logging.getLogger()
@@ -56,12 +58,13 @@ class Worker(Thread):
             if self.state == 'STOP':
                 break
             try:
-                func, args, kargs = self.threadPool.getTask(timeout=1)  #有可能Empty      
+                func, args, kargs = self.threadPool.getTask(timeout=1)
             except Empty:
                 continue
             try:
                 self.threadPool.increaseRunsNum() 
-                result = func(*args, **kargs) #这里放容易阻塞线程的任务, 下载任务，文件IO
+                #这里放容易阻塞线程的任务, 下载任务，文件IO
+                result = func(*args, **kargs) 
                 self.threadPool.decreaseRunsNum()
                 if result:
                     self.threadPool.putTaskResult(*result)
@@ -154,8 +157,10 @@ class Crawler(object):
                 while self.threadPool.getTaskLeft():
                     time.sleep(8)
                 #当池内的所有任务完成时，即代表爬完了一个网页深度
-                print 'Depth %d Finish. Totally visited %d links. \n' % (self.currentDepth, len(self.visitedHrefs))
-                logger.info('-----Depth %d Finish. Total visited Links: %d-----\n' % (self.currentDepth, len(self.visitedHrefs)))
+                print 'Depth %d Finish. Totally visited %d links. \n' % (
+                    self.currentDepth, len(self.visitedHrefs))
+                logger.info('Depth %d Finish. Total visited Links: %d\n' % (
+                    self.currentDepth, len(self.visitedHrefs)))
                 #迈进下一个深度
                 self.currentDepth += 1
             self.stop()
@@ -168,7 +173,7 @@ class Crawler(object):
     def _assignCurrentDepthTasks(self):
         while self.unvisitedHrefs:
             url = self.unvisitedHrefs.popleft()
-            self.threadPool.putTask(self._taskHandler, url)   #向任务队列分配任务
+            self.threadPool.putTask(self._taskHandler, url) #向任务队列分配任务
             self.visitedHrefs.add(url)  #标注该链接已被访问,或即将被访问,防止重复访问相同链接
  
     def _taskHandler(self, url):
@@ -192,7 +197,8 @@ class Crawler(object):
                 logger.debug('Get Page from : %s \n' % url)
                 return response.text
             else:
-                logger.warning('Page not avaliable. Status code:%d URL: %s \n' % (response.status_code, url) )
+                logger.warning('Page not avaliable. Status code:%d URL: %s \n' % (
+                    response.status_code, url) )
         except Exception,e:
             if retry>0: #超时重试
                 return self._getPageSource(url, retry-1)
@@ -331,6 +337,9 @@ def main():
 #TODO 还要整理一下文件权限验证的问题，现在的顺序和组织结构有问题
 #TODO keyword的decode可能会出问题，因为win平台是gbk
 #TODO keyboardInterrupt 的处理？
+#TODO 链接问题处理
+#TODO 网页编码还是有问题
+#TODO 爬虫被ban 的话，如何处理？
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         
 if __name__ == '__main__':
