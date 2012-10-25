@@ -9,7 +9,6 @@ from threading import Thread, Lock
 from Queue import Queue,Empty
 from urlparse import urljoin,urlparse
 from collections import deque
-from chardet import detect
 
 import requests
 from bs4 import BeautifulSoup 
@@ -136,11 +135,11 @@ class WebPage(object):
         self.url = url
         self.customeHeaders()
 
-    def getPageSource(self, retry=2):
+    def get(self, retry=2):
         '''获取html源代码'''
         try:
             #设置了prefetch=False，当访问response.text时才下载网页内容,避免下载非html文件
-            response = requests.get(self.url, headers=self.headers, timeout=10, prefetch=False,)
+            response = requests.get(self.url, headers=self.headers, timeout=10, prefetch=False)
             if self._isResponseAvaliable(response):
                 logger.debug('Get Page from : %s \n' % self.url)
                 self._handleEncoding(response)
@@ -150,7 +149,7 @@ class WebPage(object):
                     response.status_code, self.url) )
         except Exception,e:
             if retry>0: #超时重试
-                return self.getPageSource(self.url, retry-1)
+                return self.get(retry-1)
             else:
                 logger.debug(str(e) + ' URL: %s \n' % (url))
                 logger.error(traceback.format_exc())
@@ -159,8 +158,14 @@ class WebPage(object):
     def customeHeaders(self, **kargs):
         #自定义header,防止被禁,某些情况如豆瓣,还需制定cookies,否则被ban        
         self.headers = {
-            'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
-            'Referer': self.url,
+            'Accept' : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Charset' : 'gb18030,utf-8;q=0.7,*;q=0.3',
+            'Accept-Encoding' : 'gzip,deflate,sdch',
+            'Accept-Language' : 'en-US,en;q=0.8',
+            'Connection': 'keep-alive',
+            'Host':urlparse(self.url).hostname,
+            'User-Agent' : 'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
+            'Referer' : self.url,
         }
         self.headers.update(kargs)
 
@@ -231,7 +236,7 @@ class Crawler(object):
  
     def _taskHandler(self, url):
         #先拿网页源码，再保存,两个都是高阻塞的操作，交给线程处理
-        pageSource = WebPage(url).getPageSource()
+        pageSource = WebPage(url).get()
         if pageSource:
             self._saveTaskResults(url, pageSource)
             self._addUnvisitedHrefs(url, pageSource)
@@ -295,7 +300,7 @@ class Crawler(object):
         url = 'http://www.baidu.com/'
         print '\nVisiting www.baidu.com'
         #测试网络,能否顺利获取百度源码
-        pageSource = WebPage(url).getPageSource()
+        pageSource = WebPage(url).get()
         if pageSource == None:
             print 'Please check your network and make sure it\'s connected.\n'
         #测试日志保存
@@ -359,8 +364,7 @@ def main():
 #TODO 还要整理一下文件权限验证的问题，现在的顺序和组织结构有问题
 #TODO keyword的decode可能会出问题，因为win平台是gbk
 #TODO keyboardInterrupt 的处理？
-#TODO 链接问题处理
-#只需处理/////问题， mailto 等问题其实已经处理(_isHttpOrHttpsProtocol)
+#TODO 链接问题处理 /////baidu.com
 #TODO 爬虫被ban的话，如何处理？
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         
