@@ -4,6 +4,7 @@ import logging
 import time
 import re
 import traceback
+from locale import getdefaultlocale
 from datetime import datetime
 from threading import Thread, Lock
 from Queue import Queue,Empty
@@ -151,8 +152,8 @@ class WebPage(object):
             if retry>0: #超时重试
                 return self.get(retry-1)
             else:
-                logger.debug(str(e) + ' URL: %s \n' % (url))
-                logger.error(traceback.format_exc())
+                logger.debug(str(e) + ' URL: %s \n' % self.url)
+                logger.error(traceback.format_exc()+'URL:%s' % self.url)
         return None
 
     def customeHeaders(self, **kargs):
@@ -163,7 +164,7 @@ class WebPage(object):
             'Accept-Encoding' : 'gzip,deflate,sdch',
             'Accept-Language' : 'en-US,en;q=0.8',
             'Connection': 'keep-alive',
-            'Host':urlparse(self.url).hostname,
+            #'Host':urlparse(self.url).hostname, 会导致TooManyRedirects, 因为hostname不变
             'User-Agent' : 'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
             'Referer' : self.url,
         }
@@ -192,7 +193,7 @@ class Crawler(object):
     def __init__(self, args):
         self.depth = args.depth  #指定网页深度
         self.currentDepth = 1  #标注初始爬虫深度，从1开始
-        self.keyword = args.keyword.decode('utf8') #指定关键词 
+        self.keyword = args.keyword.decode(getdefaultlocale()[1]) #指定关键词,使用console的默认编码来解码
         self.database =  Database(args.dbFile)#数据库
         self.threadPool = ThreadPool(args.threadNum)  #线程池,指定线程数
         self.visitedHrefs = set()    #已访问的链接
@@ -362,7 +363,6 @@ def main():
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 #TODO 把数据库和selfTesting 从爬虫类抽取出来～！
 #TODO 还要整理一下文件权限验证的问题，现在的顺序和组织结构有问题
-#TODO keyword的decode可能会出问题，因为win平台是gbk
 #TODO keyboardInterrupt 的处理？
 #TODO 链接问题处理 /////baidu.com
 #TODO 爬虫被ban的话，如何处理？
