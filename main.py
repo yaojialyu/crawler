@@ -9,12 +9,14 @@ from threading import Thread, Lock
 from Queue import Queue,Empty
 from urlparse import urljoin,urlparse
 from collections import deque
+from chardet import detect
 
 import requests
 from bs4 import BeautifulSoup 
 
 from options import parser
 from database import Database
+
 
 #logger是全局的,线程安全
 logger = logging.getLogger()
@@ -63,7 +65,6 @@ class Worker(Thread):
                 continue
             try:
                 self.threadPool.increaseRunsNum() 
-                #这里放容易阻塞线程的任务, 下载任务，文件IO
                 result = func(*args, **kargs) 
                 self.threadPool.decreaseRunsNum()
                 if result:
@@ -129,6 +130,58 @@ class ThreadPool(object):
         return self.taskQueue.qsize()+self.resultQueue.qsize()+self.running
 
 
+class WebPage(object):
+
+    def __init__(self, url):
+        self.url = url
+        self.customeHeaders()
+
+    def getPageSource(self, retry=2):
+        '''获取html源代码'''
+        try:
+            #设置了prefetch=False，当访问response.text时才下载网页内容,避免下载非html文件
+            response = requests.get(self.url, headers=self.headers, timeout=10, prefetch=False,)
+            if self._isResponseAvaliable(response):
+                logger.debug('Get Page from : %s \n' % self.url)
+                self._handleEncoding(response)
+                return response.text
+            else:
+                logger.warning('Page not avaliable. Status code:%d URL: %s \n' % (
+                    response.status_code, self.url) )
+        except Exception,e:
+            if retry>0: #超时重试
+                return self.getPageSource(self.url, retry-1)
+            else:
+                logger.debug(str(e) + ' URL: %s \n' % (url))
+                logger.error(traceback.format_exc())
+        return None
+
+    def customeHeaders(self, **kargs):
+        #自定义header,防止被禁,某些情况如豆瓣,还需制定cookies,否则被ban        
+        self.headers = {
+            'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
+            'Referer': self.url,
+        }
+        self.headers.update(kargs)
+
+    def _isResponseAvaliable(self, response):
+        #网页为200时再获取源码 (requests自动处理跳转)。只选取html页面。 
+        if response.status_code == requests.codes.ok:
+            if 'html' in response.headers['Content-Type']:
+                return True
+        return False
+
+    def _handleEncoding(self, response):
+        #requests会自动处理编码问题.
+        #但是当header没有指定charset时,会使用RFC2616标准，指定编码为ISO-8859-1
+        #因此会再从网页源码中的meta标签中的charset去判断编码
+        if response.encoding == 'ISO-8859-1':
+            charset_re = re.compile("((^|;)\s*charset=)([^\"]*)", re.M)
+            charset=charset_re.search(response.text) 
+            charset=charset and charset.group(3) or None 
+            response.encoding = charset
+
+
 class Crawler(object):
 
     def __init__(self, args):
@@ -178,46 +231,15 @@ class Crawler(object):
  
     def _taskHandler(self, url):
         #先拿网页源码，再保存,两个都是高阻塞的操作，交给线程处理
-        pageSource = self._getPageSource(url)
+        pageSource = WebPage(url).getPageSource()
         if pageSource:
             self._saveTaskResults(url, pageSource)
             self._addUnvisitedHrefs(url, pageSource)
 
-    def _getPageSource(self, url, retry=2):
-        '''根据url,获取html源代码'''
-        #自定义header,防止被禁,某些情况如豆瓣,还需制定cookies,否则被ban
-        #设置了prefetch=False，当访问response.text 时才下载网页内容,避免下载非html文件
-        headers = {
-            'User-Agent':'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
-            'Referer': url,
-        }
-        try:
-            response = requests.get(url, headers=headers, timeout=10, prefetch=False)
-            if self._isResponseAvaliable(response, url):
-                logger.debug('Get Page from : %s \n' % url)
-                return response.text
-            else:
-                logger.warning('Page not avaliable. Status code:%d URL: %s \n' % (
-                    response.status_code, url) )
-        except Exception,e:
-            if retry>0: #超时重试
-                return self._getPageSource(url, retry-1)
-            else:
-                logger.debug(str(e) + ' URL: %s \n' % (url))
-                logger.debug(traceback.format_exc())
-        return None
-
-    def _isResponseAvaliable(self, response, url):
-        #网页为200时再获取源码 (requests自动处理跳转)。只选取html页面。 
-        if response.status_code == requests.codes.ok:
-            if 'html' in response.headers['Content-Type']:
-                return True
-        return False
-
     def _saveTaskResults(self, url, pageSource):
         try:
-            #使用正则的不区分大小写search比使用lower()后再查找要高效率
             if self.keyword:
+                #使用正则的不区分大小写search比使用lower()后再查找要高效率(?)
                 if re.search(self.keyword, pageSource, re.I):
                     self.database.saveData(url, pageSource, self.keyword) 
             else:
@@ -273,7 +295,7 @@ class Crawler(object):
         url = 'http://www.baidu.com/'
         print '\nVisiting www.baidu.com'
         #测试网络,能否顺利获取百度源码
-        pageSource = self._getPageSource(url)
+        pageSource = WebPage(url).getPageSource()
         if pageSource == None:
             print 'Please check your network and make sure it\'s connected.\n'
         #测试日志保存
@@ -338,8 +360,8 @@ def main():
 #TODO keyword的decode可能会出问题，因为win平台是gbk
 #TODO keyboardInterrupt 的处理？
 #TODO 链接问题处理
-#TODO 网页编码还是有问题
-#TODO 爬虫被ban 的话，如何处理？
+#只需处理/////问题， mailto 等问题其实已经处理(_isHttpOrHttpsProtocol)
+#TODO 爬虫被ban的话，如何处理？
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         
 if __name__ == '__main__':
