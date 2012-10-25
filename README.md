@@ -1,7 +1,7 @@
 crawler
 =======
 
-#### A Web crawler for Knownsec.  
+#### A Web crawler.  
 * Start from the url and crawl the web pages with a specified depth.  
 * Save the pages which contain a keyword(if provided) into database.  
 * Support multi-threading.  
