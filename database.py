@@ -1,5 +1,12 @@
 #coding:utf8
 
+"""
+database.py
+~~~~~~~~~~~~~
+
+该模块提供爬虫所需的sqlite数据库的创建、连接、断开，以及数据的存储功能。
+"""
+
 import sqlite3
 
 class Database(object):
