@@ -1,12 +1,19 @@
 #coding:utf8
 
+"""
+threadPool.py
+~~~~~~~~~~~~~
+
+该模块包含工作线程与线程池的实现。
+"""
+
 import traceback
 from threading import Thread, Lock
 from Queue import Queue,Empty
 import logging
 
-
 log = logging.getLogger('Main.threadPool')
+
 
 class Worker(Thread):
 

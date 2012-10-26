@@ -1,5 +1,12 @@
 #coding:utf8
 
+"""
+proxiex.py
+~~~~~~~~~~~~~
+
+该模块包含所有代理服务器列表，提供代理选择功能。
+"""
+
 #代理服务器列表
 proxiex = [
 '122.72.112.148:80',
@@ -692,10 +699,15 @@ proxiex = [
 '187.61.146.126:3128',
 '119.59.99.167:3128', ]
 
+#def 判断代理是否有效,无效重新选择
+#每个代理使用20次？
+#def 返回一个有效的代理地址,
+
+
 def main():
     import random
-    print random.choice(proxiex)
+    proxy = random.choice(proxiex)
+    print proxy
 
 if __name__ == '__main__':
     main()
-

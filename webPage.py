@@ -1,13 +1,20 @@
 #coding:utf8
 
+"""
+WebPage.py
+~~~~~~~~~~~~~
+
+该模块用于下载网页源代码, 允许自定义header与使用代理服务器
+"""
+
 import traceback
 import re
 import logging
 
 import requests
 
-
 log = logging.getLogger('Main.WebPage')
+
 
 class WebPage(object):
 
@@ -16,11 +23,11 @@ class WebPage(object):
         self.pageSource = None
         self.customeHeaders()
 
-    def fetch(self, retry=2):
+    def fetch(self, retry=2, proxies=None):
         '''获取html源代码'''
         try:
             #设置了prefetch=False，当访问response.text时才下载网页内容,避免下载非html文件
-            response = requests.get(self.url, headers=self.headers, timeout=10, prefetch=False)
+            response = requests.get(self.url, headers=self.headers, timeout=10, prefetch=False, proxies=proxies)
             if self._isResponseAvaliable(response):
                 self._handleEncoding(response)
                 self.pageSource = response.text

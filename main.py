@@ -61,12 +61,10 @@ class PrintProgress(Thread):
 
 def main():
     args = parser.parse_args()
-    
     if not congifLogger(args.logFile, args.logLevel):
         print '\nPermission denied: %s' % args.logFile
         print 'Please make sure you have the permission to save the log file!\n'
-
-    if args.testSelf:
+    elif args.testSelf:
         Crawler(args).selfTesting(args)
     else:
         crawler = Crawler(args)
@@ -79,6 +77,10 @@ def main():
 #TODO keyboardInterrupt 的处理？
 #TODO 链接问题处理 /////baidu.com
 #TODO 爬虫被ban的话，如何处理？
+    #先把可以正常访问的网页给访问完，再用代理访问被ban的页面
+    #https不走代理， 只用http代理
+    #选择代理前先判断代理是否有效
+    #每个代理使用20次，再random地选择另外一个
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 

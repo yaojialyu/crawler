@@ -1,5 +1,12 @@
 #coding:utf8
 
+"""
+options.py
+~~~~~~~~~~~~~
+
+该模块定义了程序接收的命令行参数，提供参数的默认值与格式。
+"""
+
 import argparse 
 
 _default = dict(

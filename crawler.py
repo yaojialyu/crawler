@@ -1,4 +1,12 @@
 #coding:utf8
+
+"""
+crawler.py
+~~~~~~~~~~~~~
+
+主要模块，爬虫的具体实现。
+"""
+
 from urlparse import urljoin,urlparse
 from collections import deque
 import re
@@ -13,8 +21,8 @@ from database import Database
 from webPage import WebPage
 from threadPool import ThreadPool
 
-
 log = logging.getLogger('Main.crawler')
+
 
 class Crawler(object):
 
@@ -38,7 +46,7 @@ class Crawler(object):
             self.threadPool.startThreads() 
             while self.currentDepth < self.depth+1:
                 #分配任务,线程池并发下载当前深度的所有页面（该操作不阻塞）
-                self._assignCurrentDepthTasks()
+                self._assignCurrentDepthTasks ()
                 #等待当前线程池完成所有任务
                 #self.threadPool.taskJoin()可代替以下操作，可无法Ctrl-C Interupt
                 while self.threadPool.getTaskLeft():
