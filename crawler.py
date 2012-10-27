@@ -27,14 +27,23 @@ log = logging.getLogger('Main.crawler')
 class Crawler(object):
 
     def __init__(self, args):
-        self.depth = args.depth  #指定网页深度
-        self.currentDepth = 1  #标注初始爬虫深度，从1开始
-        self.keyword = args.keyword.decode(getdefaultlocale()[1]) #指定关键词,使用console的默认编码来解码
-        self.database =  Database(args.dbFile)#数据库
-        self.threadPool = ThreadPool(args.threadNum)  #线程池,指定线程数
-        self.visitedHrefs = set()    #已访问的链接
-        self.unvisitedHrefs = deque()    #待访问的链接
-        self.unvisitedHrefs.append(args.url) #添加首个待访问的链接
+        #指定网页深度
+        self.depth = args.depth  
+        #标注初始爬虫深度，从1开始
+        self.currentDepth = 1  
+        #指定关键词,使用console的默认编码来解码
+        self.keyword = args.keyword.decode(getdefaultlocale()[1]) 
+        #数据库
+        self.database =  Database(args.dbFile)
+        #线程池,指定线程数
+        self.threadPool = ThreadPool(args.threadNum)  
+        #已访问的链接
+        self.visitedHrefs = set()   
+        #待访问的链接 
+        self.unvisitedHrefs = deque()    
+        #添加首个待访问的链接
+        self.unvisitedHrefs.append(args.url) 
+        #标记爬虫是否开始执行任务
         self.isCrawling = False
 
     def start(self):
@@ -47,16 +56,14 @@ class Crawler(object):
             while self.currentDepth < self.depth+1:
                 #分配任务,线程池并发下载当前深度的所有页面（该操作不阻塞）
                 self._assignCurrentDepthTasks ()
-                #等待当前线程池完成所有任务
+                #等待当前线程池完成所有任务,当池内的所有任务完成时，即代表爬完了一个网页深度
                 #self.threadPool.taskJoin()可代替以下操作，可无法Ctrl-C Interupt
                 while self.threadPool.getTaskLeft():
                     time.sleep(8)
-                #当池内的所有任务完成时，即代表爬完了一个网页深度
                 print 'Depth %d Finish. Totally visited %d links. \n' % (
                     self.currentDepth, len(self.visitedHrefs))
                 log.info('Depth %d Finish. Total visited Links: %d\n' % (
                     self.currentDepth, len(self.visitedHrefs)))
-                #迈进下一个深度
                 self.currentDepth += 1
             self.stop()
 
@@ -73,8 +80,10 @@ class Crawler(object):
     def _assignCurrentDepthTasks(self):
         while self.unvisitedHrefs:
             url = self.unvisitedHrefs.popleft()
-            self.threadPool.putTask(self._taskHandler, url) #向任务队列分配任务
-            self.visitedHrefs.add(url)  #标注该链接已被访问,或即将被访问,防止重复访问相同链接
+            #向任务队列分配任务
+            self.threadPool.putTask(self._taskHandler, url) 
+            #标注该链接已被访问,或即将被访问,防止重复访问相同链接
+            self.visitedHrefs.add(url)  
  
     def _taskHandler(self, url):
         #先拿网页源码，再保存,两个都是高阻塞的操作，交给线程处理

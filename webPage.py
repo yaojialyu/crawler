@@ -51,7 +51,8 @@ class WebPage(object):
             'Accept-Encoding' : 'gzip,deflate,sdch',
             'Accept-Language' : 'en-US,en;q=0.8',
             'Connection': 'keep-alive',
-            #'Host':urlparse(self.url).hostname, 会导致TooManyRedirects, 因为hostname不会随着跳转而更改
+            #设置Host会导致TooManyRedirects, 因为hostname不会随着原url跳转而更改,可不设置
+            #'Host':urlparse(self.url).hostname
             'User-Agent' : 'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.79 Safari/537.4',
             'Referer' : self.url,
         }
