@@ -74,7 +74,7 @@ class WebPage(object):
         #会使用RFC2616标准，指定编码为ISO-8859-1
         #因此需要用网页源码meta标签中的charset去判断编码
         if response.encoding == 'ISO-8859-1':
-            charset_re = re.compile("((^|;)\s*charset=)([^\"]*)", re.M)
+            charset_re = re.compile("((^|;)\s*charset\s*=)([^\"']*)", re.M)
             charset=charset_re.search(response.text) 
             charset=charset and charset.group(3) or None 
             response.encoding = charset
