@@ -15,7 +15,7 @@ from locale import getdefaultlocale
 import logging
 import time
 
-from bs4 import BeautifulSoup 
+from bs4 import BeautifulSoup
 
 from database import Database
 from webPage import WebPage
@@ -28,31 +28,31 @@ class Crawler(object):
 
     def __init__(self, args):
         #指定网页深度
-        self.depth = args.depth  
+        self.depth = args.depth
         #标注初始爬虫深度，从1开始
-        self.currentDepth = 1  
+        self.currentDepth = 1
         #指定关键词,使用console的默认编码来解码
-        self.keyword = args.keyword.decode(getdefaultlocale()[1]) 
+        self.keyword = args.keyword.decode(getdefaultlocale()[1])
         #数据库
         self.database =  Database(args.dbFile)
         #线程池,指定线程数
-        self.threadPool = ThreadPool(args.threadNum)  
+        self.threadPool = ThreadPool(args.threadNum)
         #已访问的链接
-        self.visitedHrefs = set()   
-        #待访问的链接 
-        self.unvisitedHrefs = deque()    
+        self.visitedHrefs = set()
+        #待访问的链接
+        self.unvisitedHrefs = deque()
         #添加首个待访问的链接
-        self.unvisitedHrefs.append(args.url) 
+        self.unvisitedHrefs.append(args.url)
         #标记爬虫是否开始执行任务
         self.isCrawling = False
 
     def start(self):
         print '\nStart Crawling\n'
-        if not self._isDatabaseAvaliable():
+        if not self._isDatabaseAvailable():
             print 'Error: Unable to open database file.\n'
         else:
             self.isCrawling = True
-            self.threadPool.startThreads() 
+            self.threadPool.startThreads()
             while self.currentDepth < self.depth+1:
                 #分配任务,线程池并发下载当前深度的所有页面（该操作不阻塞）
                 self._assignCurrentDepthTasks ()
@@ -81,10 +81,10 @@ class Crawler(object):
         while self.unvisitedHrefs:
             url = self.unvisitedHrefs.popleft()
             #向任务队列分配任务
-            self.threadPool.putTask(self._taskHandler, url) 
+            self.threadPool.putTask(self._taskHandler, url)
             #标注该链接已被访问,或即将被访问,防止重复访问相同链接
-            self.visitedHrefs.add(url)  
- 
+            self.visitedHrefs.add(url)
+
     def _taskHandler(self, url):
         #先拿网页源码，再保存,两个都是高阻塞的操作，交给线程处理
         webPage = WebPage(url)
@@ -98,7 +98,7 @@ class Crawler(object):
             if self.keyword:
                 #使用正则的不区分大小写search比使用lower()后再查找要高效率(?)
                 if re.search(self.keyword, pageSource, re.I):
-                    self.database.saveData(url, pageSource, self.keyword) 
+                    self.database.saveData(url, pageSource, self.keyword)
             else:
                 self.database.saveData(url, pageSource)
         except Exception, e:
@@ -120,7 +120,7 @@ class Crawler(object):
         soup = BeautifulSoup(pageSource)
         results = soup.find_all('a',href=True)
         for a in results:
-            #必须将链接encode为utf8, 因为中文文件链接如 http://aa.com/文件.pdf 
+            #必须将链接encode为utf8, 因为中文文件链接如 http://aa.com/文件.pdf
             #在bs4中不会被自动url编码，从而导致encodeException
             href = a.get('href').encode('utf8')
             if not href.startswith('http'):
@@ -139,7 +139,7 @@ class Crawler(object):
             return True
         return False
 
-    def _isDatabaseAvaliable(self):
+    def _isDatabaseAvailable(self):
         if self.database.isConn():
             return True
         return False
@@ -152,7 +152,7 @@ class Crawler(object):
         if pageSource == None:
             print 'Please check your network and make sure it\'s connected.\n'
         #数据库测试
-        elif not self._isDatabaseAvaliable():
+        elif not self._isDatabaseAvailable():
             print 'Please make sure you have the permission to save data: %s\n' % args.dbFile
         #保存数据
         else:
