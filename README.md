@@ -10,14 +10,14 @@ crawler
 
 
 
-usage
+Usage
 -------------
 ```shell
 main.py [-h] -u URL -d DEPTH [--logfile FILE] [--loglevel {1,2,3,4,5}]
                [--thread NUM] [--dbfile FILE] [--key KEYWORD] [--testself]
 ```
 
-optional arguments:
+Optional arguments:
 -------------
 ```shell
   -h, --help            show this help message and exit
@@ -29,7 +29,7 @@ optional arguments:
                         more details. Default:3
   --thread NUM          The amount of threads. Default:10
   --dbfile FILE         The SQLite file path. Default:data.sql
-  --key KEYWORD         The keyword for crawling. Default: None. For more then
+  --key KEYWORD         The keyword for crawling. Default: None. For more than
                         one word, quote them. example: --key 'Hello world'
   --testself            Crawler self test
 
