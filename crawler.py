@@ -47,9 +47,9 @@ class Crawler(object):
         self.isCrawling = False
 
     def start(self):
-        print '\nStart Crawling\n'
+        print ('\nStart Crawling\n')
         if not self._isDatabaseAvaliable():
-            print 'Error: Unable to open database file.\n'
+            print ('Error: Unable to open database file.\n')
         else:
             self.isCrawling = True
             self.threadPool.startThreads() 
@@ -60,7 +60,7 @@ class Crawler(object):
                 #self.threadPool.taskJoin()可代替以下操作，可无法Ctrl-C Interupt
                 while self.threadPool.getTaskLeft():
                     time.sleep(8)
-                print 'Depth %d Finish. Totally visited %d links. \n' % (
+                print ('Depth %d Finish. Totally visited %d links. \n') % (
                     self.currentDepth, len(self.visitedHrefs))
                 log.info('Depth %d Finish. Total visited Links: %d\n' % (
                     self.currentDepth, len(self.visitedHrefs)))
@@ -101,7 +101,7 @@ class Crawler(object):
                     self.database.saveData(url, pageSource, self.keyword) 
             else:
                 self.database.saveData(url, pageSource)
-        except Exception, e:
+        except (Exception, e):
             log.error(' URL: %s ' % url + traceback.format_exc())
 
     def _addUnvisitedHrefs(self, webPage):
@@ -146,17 +146,17 @@ class Crawler(object):
 
     def selfTesting(self, args):
         url = 'http://www.baidu.com/'
-        print '\nVisiting www.baidu.com'
+        print ('\nVisiting www.baidu.com')
         #测试网络,能否顺利获取百度源码
         pageSource = WebPage(url).fetch()
         if pageSource == None:
-            print 'Please check your network and make sure it\'s connected.\n'
+            print ('Please check your network and make sure it\'s connected.\n')
         #数据库测试
         elif not self._isDatabaseAvaliable():
-            print 'Please make sure you have the permission to save data: %s\n' % args.dbFile
+            print ('Please make sure you have the permission to save data: %s\n') % args.dbFile
         #保存数据
         else:
             self._saveTaskResults(url, pageSource)
-            print 'Create logfile and database Successfully.'
-            print 'Already save Baidu.com, Please check the database record.'
-            print 'Seems No Problem!\n'
+            print ('Create logfile and database Successfully.')
+            print ('Already save Baidu.com, Please check the database record.')
+            print ('Seems No Problem!\n')

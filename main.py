@@ -1,4 +1,4 @@
-#coding:utf8
+#coding:UTF-8
 
 import logging
 import time
@@ -23,7 +23,7 @@ def congifLogger(logFile, logLevel):
         '%(asctime)s %(threadName)s %(levelname)s %(message)s')
     try:
         fileHandler = logging.FileHandler(logFile)
-    except IOError, e:
+    except (IOError, e):
         return False
     else:
         fileHandler.setFormatter(formatter)
@@ -45,26 +45,26 @@ class PrintProgress(Thread):
     def run(self):
         while 1:
             if self.crawler.isCrawling:
-                print '-------------------------------------------'
-                print 'Crawling in depth %d' % self.crawler.currentDepth
-                print 'Already visited %d Links' % self.crawler.getAlreadyVisitedNum()
-                print '%d tasks remaining in thread pool.' % self.crawler.threadPool.getTaskLeft()
-                print '-------------------------------------------\n'   
+                print ('-------------------------------------------')
+                print ('Crawling in depth %d') % self.crawler.currentDepth
+                print ('Already visited %d Links') % self.crawler.getAlreadyVisitedNum()
+                print ('%d tasks remaining in thread pool.') % self.crawler.threadPool.getTaskLeft()
+                print ('-------------------------------------------\n'  ) 
                 time.sleep(10)
 
     def printSpendingTime(self):
         self.endTime = datetime.now()
-        print 'Begins at :%s' % self.beginTime
-        print 'Ends at   :%s' % self.endTime
-        print 'Spend time: %s \n'%(self.endTime - self.beginTime)
-        print 'Finish!'
+        print ('Begins at :%s') % self.beginTime
+        print ('Ends at   :%s') % self.endTime
+        print ('Spend time: %s \n')%(self.endTime - self.beginTime)
+        print ('Finish!')
 
 
 def main():
     args = parser.parse_args()
     if not congifLogger(args.logFile, args.logLevel):
-        print '\nPermission denied: %s' % args.logFile
-        print 'Please make sure you have the permission to save the log file!\n'
+        print ('\nPermission denied: %s') % args.logFile
+        print ('Please make sure you have the permission to save the log file!\n')
     elif args.testSelf:
         Crawler(args).selfTesting(args)
     else:
