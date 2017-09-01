@@ -30,8 +30,8 @@ def positiveInt(rawValue):
 
 def url(rawValue):
     if not rawValue.startswith('http'):
-        value = 'http://' + rawValue
-    return value
+        rawValue = 'http://' + rawValue
+    return rawValue
 
 parser = argparse.ArgumentParser(description='A Web crawler for Knownsec') 
 
